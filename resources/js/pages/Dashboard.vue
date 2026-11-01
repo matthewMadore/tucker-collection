@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head } from '@inertiajs/vue3';
 import PlaceholderPattern from '@/components/PlaceholderPattern.vue';
+import StoreArtPiece from '@/components/StoreArtPiece.vue';
 import { dashboard } from '@/routes';
 
 defineOptions({
@@ -17,6 +18,8 @@ defineOptions({
 
 <template>
     <Head title="Dashboard" />
+
+    <StoreArtPiece />
 
     <div
         class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4"
