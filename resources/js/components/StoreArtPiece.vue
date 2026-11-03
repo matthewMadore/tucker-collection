@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref } from 'vue';
-import { router } from '@inertiajs/vue3';
+import { useForm } from '@inertiajs/vue3';
 import { store } from '@/actions/App/Http/Controllers/ArtPieceController';
+import InputError from '@/components/InputError.vue';
 import {
     Dialog,
     DialogContent,
@@ -13,31 +14,33 @@ import {
 } from '@/components/ui/dialog';
 
 const open = ref(false);
-const name = ref('');
-const price = ref('');
-const description = ref('');
-const imageUrls = ref(['']);
+
+const form = useForm({
+    name: '',
+    price: '',
+    description: '',
+    images: [''],
+});
 
 function addImageField() {
-    imageUrls.value.push('');
+    form.images.push('');
 }
 
 function removeImageField(index: number) {
-    imageUrls.value.splice(index, 1);
+    form.images.splice(index, 1);
+}
+
+/**
+ * Laravel keys errors for array items as "images.0", "images.1", ...
+ */
+function imageError(index: number): string | undefined {
+    return (form.errors as Record<string, string>)[`images.${index}`];
 }
 
 function handleSubmit() {
-    router.post(store.url(), {
-        name: name.value,
-        price: price.value,
-        description: description.value,
-        images: imageUrls.value,
-    }, {
+    form.post(store.url(), {
         onSuccess: () => {
-            name.value = '';
-            price.value = '';
-            description.value = '';
-            imageUrls.value = [''];
+            form.reset();
             open.value = false;
         },
     });
@@ -58,33 +61,67 @@ function handleSubmit() {
                 </DialogDescription>
             </DialogHeader>
 
-            <div class="grid gap-2">
-                <label for="name">Name</label>
-                <input id="name" type="text" v-model="name">
-            </div>
-
-            <div class="grid gap-2">
-                <label for="price">Price</label>
-                <input id="price" type="text" v-model="price">
-            </div>
-
-            <div class="grid gap-2">
-                <label for="description">Description</label>
-                <textarea id="description" v-model="description"></textarea>
-            </div>
-
-            <div class="grid gap-2">
-                <label>Image URLs</label>
-                <div v-for="(_, index) in imageUrls" :key="index" class="flex gap-2">
-                    <input type="text" v-model="imageUrls[index]" placeholder="Image URL">
-                    <button type="button" @click="removeImageField(index)">Remove</button>
+            <form class="grid gap-4" @submit.prevent="handleSubmit">
+                <div class="grid gap-2">
+                    <label for="name">Name</label>
+                    <input id="name" type="text" v-model="form.name" />
+                    <InputError :message="form.errors.name" />
                 </div>
-                <button type="button" @click="addImageField">Add another image</button>
-            </div>
 
-            <DialogFooter>
-                <button @click="handleSubmit">Submit</button>
-            </DialogFooter>
+                <div class="grid gap-2">
+                    <label for="price">Price</label>
+                    <input
+                        id="price"
+                        type="text"
+                        inputmode="decimal"
+                        v-model="form.price"
+                    />
+                    <InputError :message="form.errors.price" />
+                </div>
+
+                <div class="grid gap-2">
+                    <label for="description">Description</label>
+                    <textarea
+                        id="description"
+                        v-model="form.description"
+                    ></textarea>
+                    <InputError :message="form.errors.description" />
+                </div>
+
+                <div class="grid gap-2">
+                    <label>Image URLs</label>
+                    <div
+                        v-for="(_, index) in form.images"
+                        :key="index"
+                        class="grid gap-1"
+                    >
+                        <div class="flex gap-2">
+                            <input
+                                type="text"
+                                v-model="form.images[index]"
+                                placeholder="https://..."
+                            />
+                            <button
+                                type="button"
+                                @click="removeImageField(index)"
+                            >
+                                Remove
+                            </button>
+                        </div>
+                        <InputError :message="imageError(index)" />
+                    </div>
+                    <InputError :message="form.errors.images" />
+                    <button type="button" @click="addImageField">
+                        Add another image
+                    </button>
+                </div>
+
+                <DialogFooter>
+                    <button type="submit" :disabled="form.processing">
+                        {{ form.processing ? 'Saving...' : 'Submit' }}
+                    </button>
+                </DialogFooter>
+            </form>
         </DialogContent>
     </Dialog>
 </template>
