@@ -2,6 +2,7 @@
 import { Head, Link } from '@inertiajs/vue3';
 import PlaceholderPattern from '@/components/PlaceholderPattern.vue';
 import StoreArtPiece from '@/components/StoreArtPiece.vue';
+import type { ImageUploadLimits } from '@/types';
 import { Badge } from '@/components/ui/badge';
 import { dashboard } from '@/routes';
 
@@ -30,13 +31,14 @@ defineProps<{
         prev_page_url: string | null;
         next_page_url: string | null;
     };
+    imageUploadLimits: ImageUploadLimits;
 }>();
 </script>
 
 <template>
     <Head title="Dashboard" />
 
-    <StoreArtPiece />
+    <StoreArtPiece :limits="imageUploadLimits" />
 
     <div
         class="flex h-full flex-1 flex-col gap-4 overflow-x-auto rounded-xl p-4"
