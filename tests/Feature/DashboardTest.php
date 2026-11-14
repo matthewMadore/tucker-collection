@@ -20,8 +20,8 @@ test('authenticated users can visit the dashboard', function () {
 test('dashboard lists art pieces newest first with their images in position order', function () {
     $this->actingAs(User::factory()->create());
     $piece = ArtPiece::factory()->create(['name' => 'Charcoal Owl']);
-    ArtPieceImage::factory()->for($piece)->create(['url' => 'https://example.com/second.jpg', 'position' => 1]);
-    ArtPieceImage::factory()->for($piece)->create(['url' => 'https://example.com/first.jpg', 'position' => 0]);
+    ArtPieceImage::factory()->for($piece)->create(['path' => 'art-pieces/second.jpg', 'position' => 1]);
+    ArtPieceImage::factory()->for($piece)->create(['path' => 'art-pieces/first.jpg', 'position' => 0]);
     ArtPiece::factory()->create(['name' => 'No Images']);
 
     $this->get(route('dashboard'))
@@ -32,7 +32,10 @@ test('dashboard lists art pieces newest first with their images in position orde
             ->where('artPieces.data.0.images', [])
             ->where('artPieces.data.0.status', 'draft')
             ->where('artPieces.data.1.name', 'Charcoal Owl')
-            ->where('artPieces.data.1.images', ['https://example.com/first.jpg', 'https://example.com/second.jpg']));
+            ->where('artPieces.data.1.images', [
+                'http://localhost/storage/art-pieces/first.jpg',
+                'http://localhost/storage/art-pieces/second.jpg',
+            ]));
 });
 
 test('dashboard paginates art pieces 24 per page', function () {
@@ -46,4 +49,17 @@ test('dashboard paginates art pieces 24 per page', function () {
 
     $this->get(route('dashboard', ['page' => 2]))
         ->assertInertia(fn ($page) => $page->has('artPieces.data', 1));
+});
+
+test('dashboard shares the image upload limits with the upload dialog', function () {
+    $this->actingAs(User::factory()->create());
+
+    $this->get(route('dashboard'))
+        ->assertInertia(fn ($page) => $page
+            ->where('imageUploadLimits', [
+                'max_images' => 19,
+                'max_image_bytes' => 10 * 1024 * 1024,
+                'max_total_bytes' => 80 * 1024 * 1024,
+                'accepted_extensions' => ['jpg', 'jpeg', 'png', 'webp'],
+            ]));
 });

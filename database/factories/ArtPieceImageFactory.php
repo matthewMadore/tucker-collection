@@ -20,7 +20,7 @@ class ArtPieceImageFactory extends Factory
     {
         return [
             'art_piece_id' => ArtPiece::factory(),
-            'url' => 'https://picsum.photos/seed/'.fake()->unique()->uuid().'/800/450',
+            'path' => 'art-pieces/'.fake()->unique()->uuid().'.jpg',
             'position' => 0,
         ];
     }

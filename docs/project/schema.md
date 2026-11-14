@@ -22,7 +22,7 @@ erDiagram
     art_piece_images {
         bigint id PK
         bigint art_piece_id FK "NOT NULL"
-        text url "https URL (validated in StoreArtPieceRequest)"
+        text path "file path on the public disk, e.g. art-pieces/abc.jpg"
         integer position "default 0, display order"
         timestamp created_at
         timestamp updated_at
@@ -129,13 +129,15 @@ sequenceDiagram
     participant C as ArtPieceController
     participant DB as Postgres
 
-    V->>R: POST /art-pieces (name, price, description, images[])
+    V->>R: POST /art-pieces (multipart: name, price, description, images[] files)
     R->>F: validate
     alt invalid
         F-->>V: redirect back with errors (shown under fields)
     else valid
         F->>C: store(validated data)
-        C->>DB: transaction: INSERT art_pieces, then INSERT art_piece_images
+        C->>C: save each image file to storage/app/public/art-pieces
+        C->>DB: transaction: INSERT art_pieces, then INSERT art_piece_images (paths)
+        Note over C: if the transaction fails, the saved files are deleted
         C-->>V: redirect back + flash toast
         V->>C: GET /dashboard (Inertia reload)
         C->>DB: SELECT art_pieces (paginated) + images (eager loaded)
@@ -146,6 +148,7 @@ sequenceDiagram
 ## Current tables (v1)
 
 **`art_pieces`**
+
 - `id` — auto-incrementing primary key
 - `name` — the piece's title
 - `description` — free text, defaults to empty string
@@ -153,23 +156,28 @@ sequenceDiagram
   float, to avoid rounding errors. `CHECK (price_cents > 0)` — a piece
   worth $0 isn't a real listing.
 - `status` — defaults to `'draft'`. `CHECK (status IN ('draft',
-  'published', 'held', 'sold'))` — the database, not just application
+'published', 'held', 'sold'))` — the database, not just application
   code, makes an invalid status unrepresentable.
 - `created_at` / `updated_at`
 
 **`art_piece_images`**
+
 - `id`
 - `art_piece_id` — foreign key, `ON DELETE CASCADE` (deleting a piece
   deletes its images with it)
-- `url` — plain text URL for now (see "Deferred" below)
+- `path` — where the uploaded file lives on the `public` disk (e.g.
+  `art-pieces/abc.jpg`). Only the path is stored, not a full URL; the
+  `ArtPieceImage::url` accessor builds the URL from the disk config, so
+  moving to S3 later is a config change, not a data migration.
+  (Renamed from `url` once drag-and-drop upload replaced URL fields.)
 - `position` — integer, for ordering multiple images
 - `created_at` / `updated_at`
 
 ## Why this schema, and what it's scoped to
 
 This is deliberately scoped to exactly what the current admin "Add Art
-Piece" dialog collects: name, description, price, and a list of image
-URLs. No column exists here that isn't backed by a real, currently-used
+Piece" dialog collects: name, description, price, and uploaded image
+files. No column exists here that isn't backed by a real, currently-used
 field — adding unused columns now would be building for a hypothetical
 future requirement rather than the app's actual current state.
 
@@ -191,11 +199,9 @@ leaves out, since the current form doesn't collect them yet:
   allows `'held'` as a value, but the actual hold-expiry logic isn't
   built yet.
 - On images: `is_primary` (which image is the main display photo),
-  and real object storage (`s3_key_original` / `derivatives`) instead
-  of a plain `url` column — this app doesn't have real file upload
-  yet; that's planned as its own dedicated build (drag-and-drop image
-  upload), after which `url` here will likely become a real storage
-  key instead of an arbitrary text field.
+  and resized `derivatives` (thumbnails). Uploads are now real files
+  stored by `path` on the local `public` disk; moving them to S3 is a
+  later step.
 
 These aren't oversights — they're the next real expansions, added when
 the feature that actually needs them gets built, not before.
