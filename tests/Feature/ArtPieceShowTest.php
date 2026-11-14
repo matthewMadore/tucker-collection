@@ -33,6 +33,12 @@ test('the art piece page shows its details and image URLs in position order', fu
             ->where('artPiece.images', [
                 ['id' => $first->id, 'url' => 'http://localhost/storage/art-pieces/first.jpg'],
                 ['id' => $second->id, 'url' => 'http://localhost/storage/art-pieces/second.jpg'],
+            ])
+            ->where('statuses', [
+                ['value' => 'draft', 'label' => 'Draft'],
+                ['value' => 'published', 'label' => 'Published'],
+                ['value' => 'held', 'label' => 'On hold'],
+                ['value' => 'sold', 'label' => 'Sold'],
             ]));
 });
 

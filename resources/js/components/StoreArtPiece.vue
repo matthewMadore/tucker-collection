@@ -12,6 +12,9 @@ import {
     DialogTitle,
     DialogTrigger,
 } from '@/components/ui/dialog';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
+import { Label } from '@/components/ui/label';
 import type { ImageUploadLimits } from '@/types';
 
 const props = defineProps<{
@@ -241,7 +244,7 @@ function handleSubmit() {
 <template>
     <Dialog v-model:open="open">
         <DialogTrigger as-child>
-            <button>Add Art Piece</button>
+            <Button class="m-4 self-start">Add Art Piece</Button>
         </DialogTrigger>
 
         <DialogContent class="max-h-[90vh] overflow-y-auto">
@@ -254,33 +257,36 @@ function handleSubmit() {
 
             <form class="grid gap-4" @submit.prevent="handleSubmit">
                 <div class="grid gap-2">
-                    <label for="name">Name</label>
-                    <input id="name" type="text" v-model="form.name" />
+                    <Label for="name">Name</Label>
+                    <Input id="name" type="text" v-model="form.name" />
                     <InputError :message="form.errors.name" />
                 </div>
 
                 <div class="grid gap-2">
-                    <label for="price">Price</label>
-                    <input
+                    <Label for="price">Price</Label>
+                    <Input
                         id="price"
                         type="text"
                         inputmode="decimal"
+                        placeholder="0.00"
                         v-model="form.price"
                     />
                     <InputError :message="form.errors.price" />
                 </div>
 
                 <div class="grid gap-2">
-                    <label for="description">Description</label>
+                    <Label for="description">Description</Label>
                     <textarea
                         id="description"
+                        rows="3"
+                        class="border-input placeholder:text-muted-foreground focus-visible:border-ring focus-visible:ring-ring/50 dark:bg-input/30 w-full min-w-0 rounded-md border bg-transparent px-3 py-2 text-base shadow-xs outline-none focus-visible:ring-[3px] md:text-sm"
                         v-model="form.description"
                     ></textarea>
                     <InputError :message="form.errors.description" />
                 </div>
 
                 <div class="grid gap-2">
-                    <label for="images">Images</label>
+                    <Label for="images">Images</Label>
                     <div
                         role="button"
                         tabindex="0"
@@ -308,13 +314,20 @@ function handleSubmit() {
                             <span> Remove an image to add another. </span>
                         </template>
                         <template v-else>
-                            <span class="text-foreground font-medium">
+                            <span
+                                class="text-foreground font-medium pointer-coarse:hidden"
+                            >
                                 Drag and drop images here
                             </span>
+                            <span
+                                class="text-foreground hidden font-medium pointer-coarse:inline"
+                            >
+                                Tap to choose photos
+                            </span>
                             <span>
-                                or click to choose files ({{
-                                    acceptedTypesLabel
-                                }}, up to
+                                <span class="pointer-coarse:hidden"
+                                    >or click to choose files </span
+                                >({{ acceptedTypesLabel }}, up to
                                 {{ formatBytes(limits.max_image_bytes) }} each)
                             </span>
                         </template>
@@ -416,9 +429,13 @@ function handleSubmit() {
                 <DialogFooter
                     class="bg-background sticky -bottom-6 -mb-6 pt-2 pb-6"
                 >
-                    <button type="submit" :disabled="form.processing">
+                    <Button
+                        type="submit"
+                        class="w-full sm:w-auto"
+                        :disabled="form.processing"
+                    >
                         {{ form.processing ? 'Saving...' : 'Submit' }}
-                    </button>
+                    </Button>
                 </DialogFooter>
             </form>
         </DialogContent>

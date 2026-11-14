@@ -143,8 +143,9 @@ return [
     |
     */
 
+    // Registration is off: only the people who manage the art pieces have
+    // accounts. Create them with `php artisan app:create-user`.
     'features' => [
-        Features::registration(),
         Features::resetPasswords(),
         Features::emailVerification(),
         Features::twoFactorAuthentication([

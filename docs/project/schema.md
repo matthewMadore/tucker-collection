@@ -157,7 +157,9 @@ sequenceDiagram
   worth $0 isn't a real listing.
 - `status` — defaults to `'draft'`. `CHECK (status IN ('draft',
 'published', 'held', 'sold'))` — the database, not just application
-  code, makes an invalid status unrepresentable.
+  code, makes an invalid status unrepresentable. In PHP it's cast to
+  the `App\Enums\ArtPieceStatus` enum (labels, and `isPublic()`: every
+  status but `draft` appears in the public gallery).
 - `created_at` / `updated_at`
 
 **`art_piece_images`**

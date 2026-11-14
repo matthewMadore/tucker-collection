@@ -18,9 +18,14 @@ Each step below is a real prerequisite for the next, not boilerplate ritual:
     ./vendor/bin/sail up -d       # starts the app, Postgres, and Mailpit containers
     ./vendor/bin/sail artisan migrate
     ln -s ../storage/app/public public/storage   # serves uploaded art piece images at /storage
+    ./vendor/bin/sail artisan app:create-user    # sign-up is disabled, so logins are created here
     npm run dev
 
-Visit `http://localhost`. Mailpit (local email inbox) is at `http://localhost:8025`.
+Visit `http://localhost` for the public gallery and `http://localhost/login` to
+manage pieces. Mailpit (local email inbox) is at `http://localhost:8025`.
+
+On an iPhone, open the site in Safari, tap Share, then **Add to Home Screen**.
+It opens full screen like an app (see `public/manifest.webmanifest`).
 
 The storage link is relative on purpose. `php artisan storage:link` writes an
 absolute path, so a link made on the Mac points at a path the container can't

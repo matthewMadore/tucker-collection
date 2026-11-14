@@ -2,7 +2,9 @@
 
 namespace App\Http\Controllers;
 
+use App\Enums\ArtPieceStatus;
 use App\Http\Requests\StoreArtPieceRequest;
+use App\Http\Requests\UpdateArtPieceStatusRequest;
 use App\Models\ArtPiece;
 use App\Models\ArtPieceImage;
 use Illuminate\Http\RedirectResponse;
@@ -25,7 +27,7 @@ class ArtPieceController extends Controller
                 'id' => $artPiece->id,
                 'name' => $artPiece->name,
                 'price_cents' => $artPiece->price_cents,
-                'status' => $artPiece->status,
+                'status' => $artPiece->status->value,
                 'images' => $artPiece->images->pluck('url')->all(),
             ]);
 
@@ -45,13 +47,25 @@ class ArtPieceController extends Controller
                 'name' => $artPiece->name,
                 'description' => $artPiece->description,
                 'price_cents' => $artPiece->price_cents,
-                'status' => $artPiece->status,
+                'status' => $artPiece->status->value,
                 'images' => $artPiece->images->map(fn (ArtPieceImage $image) => [
                     'id' => $image->id,
                     'url' => $image->url,
                 ])->all(),
             ],
+            'statuses' => ArtPieceStatus::options(),
         ]);
+    }
+
+    public function updateStatus(UpdateArtPieceStatusRequest $request, ArtPiece $artPiece): RedirectResponse
+    {
+        $artPiece->update(['status' => $request->enum('status', ArtPieceStatus::class)]);
+
+        Inertia::flash('toast', ['type' => 'success', 'message' => __('Status changed to :status.', [
+            'status' => $artPiece->status->label(),
+        ])]);
+
+        return redirect()->back();
     }
 
     public function store(StoreArtPieceRequest $request): RedirectResponse

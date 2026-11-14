@@ -1,0 +1,56 @@
+<script setup lang="ts">
+import { Head, Link } from '@inertiajs/vue3';
+import ArtPieceImageGallery from '@/components/ArtPieceImageGallery.vue';
+import { Badge } from '@/components/ui/badge';
+import { home } from '@/routes';
+
+defineProps<{
+    artPiece: {
+        id: number;
+        name: string;
+        description: string;
+        price_cents: number;
+        status: string;
+        status_label: string;
+        images: {
+            id: number;
+            url: string;
+        }[];
+    };
+}>();
+</script>
+
+<template>
+    <Head :title="artPiece.name" />
+
+    <div class="grid gap-4 p-4">
+        <Link :href="home()" class="text-muted-foreground text-sm">
+            ← Back to gallery
+        </Link>
+
+        <div class="grid gap-6 lg:grid-cols-[2fr_1fr]">
+            <ArtPieceImageGallery
+                :name="artPiece.name"
+                :images="artPiece.images"
+            />
+
+            <section class="grid content-start gap-3" aria-label="Details">
+                <div class="flex items-start justify-between gap-2">
+                    <h1 class="text-xl font-semibold">{{ artPiece.name }}</h1>
+                    <Badge v-if="artPiece.status !== 'published'">
+                        {{ artPiece.status_label }}
+                    </Badge>
+                </div>
+                <p class="text-lg">
+                    ${{ (artPiece.price_cents / 100).toFixed(2) }}
+                </p>
+                <p
+                    v-if="artPiece.description"
+                    class="text-muted-foreground whitespace-pre-line"
+                >
+                    {{ artPiece.description }}
+                </p>
+            </section>
+        </div>
+    </div>
+</template>
