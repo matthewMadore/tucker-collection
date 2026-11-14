@@ -48,6 +48,7 @@ class ArtPieceController extends Controller
                 'description' => $artPiece->description,
                 'price_cents' => $artPiece->price_cents,
                 'status' => $artPiece->status->value,
+                'allowed_statuses' => array_map(fn (ArtPieceStatus $status) => $status->value, $artPiece->status->allowedTransitions()),
                 'images' => $artPiece->images->map(fn (ArtPieceImage $image) => [
                     'id' => $image->id,
                     'url' => $image->url,
@@ -59,7 +60,7 @@ class ArtPieceController extends Controller
 
     public function updateStatus(UpdateArtPieceStatusRequest $request, ArtPiece $artPiece): RedirectResponse
     {
-        $artPiece->update(['status' => $request->enum('status', ArtPieceStatus::class)]);
+        $artPiece->transitionTo($request->enum('status', ArtPieceStatus::class));
 
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Status changed to :status.', [
             'status' => $artPiece->status->label(),

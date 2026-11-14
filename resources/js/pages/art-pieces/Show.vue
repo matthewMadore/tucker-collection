@@ -17,6 +17,7 @@ const props = defineProps<{
         description: string;
         price_cents: number;
         status: string;
+        allowed_statuses: string[];
         images: {
             id: number;
             url: string;
@@ -40,6 +41,10 @@ const statusForm = useForm({
 });
 
 function changeStatus(status: string): void {
+    if (status === props.artPiece.status) {
+        return;
+    }
+
     statusForm.status = status;
     statusForm.patch(updateStatus.url(props.artPiece.id), {
         preserveScroll: true,
@@ -86,7 +91,13 @@ function changeStatus(status: string): void {
                                 : 'outline'
                         "
                         :aria-pressed="artPiece.status === status.value"
-                        :disabled="statusForm.processing"
+                        :disabled="
+                            statusForm.processing ||
+                            (artPiece.status !== status.value &&
+                                !artPiece.allowed_statuses.includes(
+                                    status.value,
+                                ))
+                        "
                         @click="changeStatus(status.value)"
                     >
                         {{ status.label }}

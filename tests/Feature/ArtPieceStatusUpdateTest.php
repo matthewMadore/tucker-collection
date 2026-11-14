@@ -38,3 +38,23 @@ test('an unknown status is rejected', function () {
 
     expect($piece->fresh()->status)->toBe(ArtPieceStatus::Draft);
 });
+
+test('a move the state machine forbids is rejected', function () {
+    $this->actingAs(User::factory()->create());
+    $piece = ArtPiece::factory()->create(['status' => 'sold']);
+
+    $this->from(route('art-pieces.show', $piece))
+        ->patch(route('art-pieces.status.update', $piece), ['status' => 'draft'])
+        ->assertSessionHasErrors(['status' => "Can't change status from Sold to Draft."]);
+
+    expect($piece->fresh()->status)->toBe(ArtPieceStatus::Sold);
+});
+
+test('the model refuses an illegal transition instead of saving it', function () {
+    $piece = ArtPiece::factory()->create(['status' => 'sold']);
+
+    expect(fn () => $piece->transitionTo(ArtPieceStatus::Draft))
+        ->toThrow(DomainException::class, 'Cannot change an art piece from sold to draft.');
+
+    expect($piece->fresh()->status)->toBe(ArtPieceStatus::Sold);
+});

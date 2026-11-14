@@ -159,7 +159,10 @@ sequenceDiagram
 'published', 'held', 'sold'))` — the database, not just application
   code, makes an invalid status unrepresentable. In PHP it's cast to
   the `App\Enums\ArtPieceStatus` enum (labels, and `isPublic()`: every
-  status but `draft` appears in the public gallery).
+  status but `draft` appears in the public gallery). Which status
+  can move to which is enforced in PHP by the enum's state machine
+  (`allowedTransitions()`, `ArtPiece::transitionTo()`); see
+  [public-gallery.md](public-gallery.md#key-decisions).
 - `created_at` / `updated_at`
 
 **`art_piece_images`**

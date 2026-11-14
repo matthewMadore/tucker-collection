@@ -4,6 +4,7 @@ namespace App\Models;
 
 use App\Enums\ArtPieceStatus;
 use Database\Factories\ArtPieceFactory;
+use DomainException;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -36,6 +37,20 @@ class ArtPiece extends Model
     public function images(): HasMany
     {
         return $this->hasMany(ArtPieceImage::class);
+    }
+
+    /**
+     * The only way status should change: illegal moves throw instead of saving.
+     *
+     * @throws DomainException
+     */
+    public function transitionTo(ArtPieceStatus $to): void
+    {
+        if (! $this->status->canTransitionTo($to)) {
+            throw new DomainException("Cannot change an art piece from {$this->status->value} to {$to->value}.");
+        }
+
+        $this->update(['status' => $to]);
     }
 
     /**

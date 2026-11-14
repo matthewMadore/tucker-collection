@@ -19,6 +19,7 @@ accounts are created from the command line.
   Draft. The admin detail page has one button per status; the current
   one is highlighted. Changing it flashes a toast ("Status changed to
   Published.") and, for non-drafts, shows a "View public page" link.
+  Only moves the state machine allows are enabled (below).
 - **Public gallery:** published, held and sold pieces, newest first,
   24 per page. Each card shows the first image (by `position`), name and
   price. Held and sold pieces carry an "On hold" / "Sold" badge, so the
@@ -70,6 +71,20 @@ Defined in [routes/web.php](../../routes/web.php#L7).
   it, validation uses `Rule::enum`, and the admin page gets its buttons
   from `ArtPieceStatus::options()`. The values match the database CHECK
   constraint.
+- **Status state machine:** `allowedTransitions()` on the enum lists
+  every legal move; anything else is illegal. `ArtPiece::transitionTo()`
+  throws on an illegal move, and the admin request rejects it with
+  "Can't change status from Sold to Draft." The same pattern
+  ([HasStatusTransitions](../../app/Concerns/HasStatusTransitions.php))
+  backs `PaymentStatus` and `OrderStatus` for checkout.
+
+    | From      | Allowed to                        |
+    | --------- | --------------------------------- |
+    | Draft     | Published, Sold (offline sale)    |
+    | Published | Draft, On hold, Sold              |
+    | On hold   | Published, Sold                   |
+    | Sold      | Published (relist after a refund) |
+
 - **Shared image viewer:** [ArtPieceImageGallery.vue](../../resources/js/components/ArtPieceImageGallery.vue)
   is used by both the admin and public piece pages.
 - **Closed registration over an admin role:** with two accounts, created
