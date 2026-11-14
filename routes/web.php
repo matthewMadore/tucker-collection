@@ -8,6 +8,7 @@ Route::inertia('/', 'Welcome')->name('home');
 Route::middleware(['auth', 'verified'])->group(function () {
     Route::get('dashboard', [ArtPieceController::class, 'index'])->name('dashboard');
     Route::post('art-pieces', [ArtPieceController::class, 'store']);
+    Route::get('art-pieces/{artPiece}', [ArtPieceController::class, 'show'])->name('art-pieces.show');
 });
 
 require __DIR__.'/settings.php';

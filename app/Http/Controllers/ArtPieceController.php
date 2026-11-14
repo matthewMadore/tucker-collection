@@ -35,6 +35,25 @@ class ArtPieceController extends Controller
         ]);
     }
 
+    public function show(ArtPiece $artPiece): Response
+    {
+        $artPiece->load(['images' => fn ($query) => $query->orderBy('position')]);
+
+        return Inertia::render('art-pieces/Show', [
+            'artPiece' => [
+                'id' => $artPiece->id,
+                'name' => $artPiece->name,
+                'description' => $artPiece->description,
+                'price_cents' => $artPiece->price_cents,
+                'status' => $artPiece->status,
+                'images' => $artPiece->images->map(fn (ArtPieceImage $image) => [
+                    'id' => $image->id,
+                    'url' => $image->url,
+                ])->all(),
+            ],
+        ]);
+    }
+
     public function store(StoreArtPieceRequest $request): RedirectResponse
     {
         $validated = $request->validated();

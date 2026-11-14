@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
+import { show } from '@/actions/App/Http/Controllers/ArtPieceController';
 import PlaceholderPattern from '@/components/PlaceholderPattern.vue';
 import StoreArtPiece from '@/components/StoreArtPiece.vue';
 import type { ImageUploadLimits } from '@/types';
@@ -46,10 +47,11 @@ defineProps<{
         <p v-if="artPieces.data.length === 0">No art pieces yet.</p>
 
         <div class="grid auto-rows-min gap-4 md:grid-cols-3">
-            <div
+            <Link
                 v-for="artPiece in artPieces.data"
                 :key="artPiece.id"
-                class="border-sidebar-border/70 dark:border-sidebar-border overflow-hidden rounded-xl border"
+                :href="show(artPiece.id)"
+                class="border-sidebar-border/70 dark:border-sidebar-border hover:border-primary focus-visible:ring-ring block overflow-hidden rounded-xl border transition-colors focus-visible:ring-2 focus-visible:outline-none"
             >
                 <div class="relative aspect-video">
                     <img
@@ -71,7 +73,7 @@ defineProps<{
                         {{ artPiece.images.length === 1 ? 'image' : 'images' }}
                     </p>
                 </div>
-            </div>
+            </Link>
         </div>
 
         <div
