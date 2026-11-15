@@ -36,6 +36,31 @@ return [
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
 
+    // UPS Rating API. When client_id is empty, checkout uses the flat rate.
+    'ups' => [
+        'client_id' => env('UPS_CLIENT_ID'),
+        'client_secret' => env('UPS_CLIENT_SECRET'),
+        'account_number' => env('UPS_ACCOUNT_NUMBER'),
+        // Sandbox by default; production is https://onlinetools.ups.com.
+        'base_url' => env('UPS_BASE_URL', 'https://wwwcie.ups.com'),
+        'ship_from' => [
+            'name' => env('UPS_SHIP_FROM_NAME', env('APP_NAME')),
+            'line1' => env('UPS_SHIP_FROM_LINE1'),
+            'city' => env('UPS_SHIP_FROM_CITY'),
+            'state' => env('UPS_SHIP_FROM_STATE'),
+            'postal_code' => env('UPS_SHIP_FROM_POSTAL_CODE'),
+            'country' => env('UPS_SHIP_FROM_COUNTRY', 'US'),
+        ],
+        // Pieces don't have their own size and weight yet, so every piece
+        // ships in this default box (inches, pounds).
+        'default_package' => [
+            'length' => env('UPS_PACKAGE_LENGTH', 24),
+            'width' => env('UPS_PACKAGE_WIDTH', 20),
+            'height' => env('UPS_PACKAGE_HEIGHT', 4),
+            'weight' => env('UPS_PACKAGE_WEIGHT', 8),
+        ],
+    ],
+
     'slack' => [
         'notifications' => [
             'bot_user_oauth_token' => env('SLACK_BOT_USER_OAUTH_TOKEN'),

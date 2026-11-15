@@ -5,8 +5,9 @@ namespace App\Providers;
 use App\Contracts\PaymentGateway;
 use App\Contracts\ShippingRateProvider;
 use App\Gateways\FakeStripePaymentGateway;
-use App\Gateways\FakeUpsShippingRateProvider;
+use App\Gateways\FlatRateShippingProvider;
 use App\Gateways\StripePaymentGateway;
+use App\Gateways\UpsShippingRateProvider;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -30,7 +31,11 @@ class AppServiceProvider extends ServiceProvider
             ? new StripePaymentGateway(new StripeClient((string) config('services.stripe.secret')))
             : new FakeStripePaymentGateway);
 
-        $this->app->bind(ShippingRateProvider::class, FakeUpsShippingRateProvider::class);
+        // Live UPS rates when UPS credentials are configured, the flat rate
+        // otherwise. phpunit.xml clears UPS_CLIENT_ID.
+        $this->app->bind(ShippingRateProvider::class, fn (): ShippingRateProvider => filled(config('services.ups.client_id'))
+            ? new UpsShippingRateProvider(config('services.ups'), new FlatRateShippingProvider)
+            : new FlatRateShippingProvider);
     }
 
     /**

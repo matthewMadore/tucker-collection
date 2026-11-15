@@ -2,7 +2,7 @@
 
 use App\Contracts\PaymentGateway;
 use App\Enums\ArtPieceStatus;
-use App\Gateways\FakeUpsShippingRateProvider;
+use App\Gateways\FlatRateShippingProvider;
 use App\Models\ArtPiece;
 use App\Models\Order;
 use App\Services\CheckoutService;
@@ -143,7 +143,7 @@ test('checkout is rate limited per IP', function () {
 test('the fake UPS rate adds $5 of insurance per full $1,000 of the piece\'s price', function (int $priceCents, int $expectedRateCents) {
     $piece = ArtPiece::factory()->make(['price_cents' => $priceCents]);
 
-    expect((new FakeUpsShippingRateProvider)->quote($piece, [])->rateCents)->toBe($expectedRateCents);
+    expect((new FlatRateShippingProvider)->quote($piece, [])->rateCents)->toBe($expectedRateCents);
 })->with([
     'under $1,000' => [99_999, 4_500],
     'exactly $1,000' => [100_000, 5_000],

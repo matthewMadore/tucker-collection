@@ -6,11 +6,11 @@ use App\Contracts\ShippingRateProvider;
 use App\Models\ArtPiece;
 
 /**
- * Stands in for the UPS Rating API until UPS credentials are configured.
- * Deterministic, so tests and demos get an explainable number: a base rate
- * plus $5 of declared-value insurance per full $1,000 of the piece's price.
+ * A fixed UPS Ground rate: a base rate plus $5 of declared-value insurance
+ * per full $1,000 of the piece's price. Used when UPS credentials aren't
+ * configured, and as the fallback when the UPS API fails at checkout.
  */
-class FakeUpsShippingRateProvider implements ShippingRateProvider
+class FlatRateShippingProvider implements ShippingRateProvider
 {
     public const int BASE_RATE_CENTS = 4_500;
 

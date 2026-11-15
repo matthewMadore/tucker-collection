@@ -25,8 +25,9 @@ Each step below is a real prerequisite for the next, not boilerplate ritual:
 Visit `http://localhost` for the public gallery and `http://localhost/login` to
 manage pieces. Mailpit (local email inbox) is at `http://localhost:8025`.
 
-Payments use a fake Stripe gateway until `STRIPE_SECRET` is set in `.env`.
-To use Stripe test mode locally, see
+Payments use a fake Stripe gateway until `STRIPE_SECRET` is set in `.env`, and
+shipping uses a flat UPS rate until `UPS_CLIENT_ID` is set.
+For Stripe test mode and UPS setup, see
 [docs/project/checkout.md](docs/project/checkout.md#running-locally-with-stripe-test-mode).
 
 On an iPhone, open the site in Safari, tap Share, then **Add to Home Screen**.

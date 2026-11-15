@@ -5,12 +5,12 @@ Guest checkout for a single piece, ported from the Fable version
 need an account; the order stores their email.
 
 **Status (2026-11-14):** checkout (with server-quoted shipping), the
-payment webhook and hold expiry work end to end on the fake gateways
-(verified in the running app). The real Stripe gateway is in place and
-used whenever `STRIPE_SECRET` is set; it's tested against a recorded
-Stripe HTTP layer but not yet a live Stripe test account. Shipping rates
-come from a fake UPS provider. Not built yet: the real UPS Rating API, the
-card form, emails, and admin orders. See [Roadmap](#roadmap).
+payment webhook and hold expiry work end to end on the fake/flat-rate
+providers (verified in the running app). The real Stripe gateway and the
+live UPS rate provider are in place and switch on when their credentials
+are set; both are tested against recorded or faked HTTP, not yet against
+live Stripe test mode or the UPS sandbox. Not built yet: the card form,
+emails, and admin orders. See [Roadmap](#roadmap).
 
 ## Checkout call chain
 
@@ -19,7 +19,7 @@ login; rate-limited. Returns JSON for the card form (not a page visit).
 
 | #   | Location                                                                           | Responsibility                                                                                                                                                                                                                                                               |
 | --- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:44](../../app/Providers/AppServiceProvider.php#L44)), against card-testing bots.                                                                                               |
+| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:49](../../app/Providers/AppServiceProvider.php#L49)), against card-testing bots.                                                                                               |
 | 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                                                                                                                         |
 | 3   | [CheckoutController.php:19](../../app/Http/Controllers/CheckoutController.php#L19) | Drafts return 404, as on the public piece page.                                                                                                                                                                                                                              |
 | 4   | [CheckoutService.php:40](../../app/Services/CheckoutService.php#L40)               | One transaction for steps 5–9: any failure rolls everything back and the piece stays published.                                                                                                                                                                              |
@@ -124,7 +124,7 @@ so no Stripe SDK type leaks into the app.
 
 | Gateway                                                                     | Used when                                                                                            | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [StripePaymentGateway](../../app/Gateways/StripePaymentGateway.php)         | `STRIPE_SECRET` is set ([AppServiceProvider.php:29](../../app/Providers/AppServiceProvider.php#L29)) | Creates a PaymentIntent for the order total with `order_id` metadata and `receipt_email` (Stripe emails the buyer a receipt). Sends an idempotency key per order ([line 30](../../app/Gateways/StripePaymentGateway.php#L30)), so a retried request can't create a second payment. `cancelIntent()` treats "already cancelled" as success and throws on anything else, such as "already succeeded" ([line 43](../../app/Gateways/StripePaymentGateway.php#L43)), which keeps the hold. |
+| [StripePaymentGateway](../../app/Gateways/StripePaymentGateway.php)         | `STRIPE_SECRET` is set ([AppServiceProvider.php:30](../../app/Providers/AppServiceProvider.php#L30)) | Creates a PaymentIntent for the order total with `order_id` metadata and `receipt_email` (Stripe emails the buyer a receipt). Sends an idempotency key per order ([line 30](../../app/Gateways/StripePaymentGateway.php#L30)), so a retried request can't create a second payment. `cancelIntent()` treats "already cancelled" as success and throws on anything else, such as "already succeeded" ([line 43](../../app/Gateways/StripePaymentGateway.php#L43)), which keeps the hold. |
 | [FakeStripePaymentGateway](../../app/Gateways/FakeStripePaymentGateway.php) | `STRIPE_SECRET` is empty                                                                             | Returns fake ids; cancelling does nothing. Local development works without a Stripe account.                                                                                                                                                                                                                                                                                                                                                                                           |
 
 `phpunit.xml` forces `STRIPE_SECRET` to empty, so the test suite never
@@ -138,15 +138,44 @@ for a quote on the server, so the shipping cost (like the price) can't be
 set by the browser. It receives the whole art piece, not just its price,
 because real carrier rates need the package's size and weight.
 
-[FakeUpsShippingRateProvider](../../app/Gateways/FakeUpsShippingRateProvider.php)
-is bound in `AppServiceProvider` until UPS credentials exist: $45 UPS
-Ground (signature required) plus $5 of declared-value insurance per full
-$1,000 of the piece's price, 5 days. The real UPS Rating API comes next.
+| Provider                                                                    | Used when                                                                                            | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                   |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [UpsShippingRateProvider](../../app/Gateways/UpsShippingRateProvider.php)   | `UPS_CLIENT_ID` is set ([AppServiceProvider.php:36](../../app/Providers/AppServiceProvider.php#L36)) | Live UPS Ground rate from the Rating API (`/api/rating/v2409/Rate`, [line 61](../../app/Gateways/UpsShippingRateProvider.php#L61)): signature required (package-level `DCISType "2"`, [line 81](../../app/Gateways/UpsShippingRateProvider.php#L81)) and the piece's price as declared value. Charges the account's negotiated rate when UPS returns one ([line 92](../../app/Gateways/UpsShippingRateProvider.php#L92)). The OAuth token is cached until a minute before it expires ([line 123](../../app/Gateways/UpsShippingRateProvider.php#L123)). **If UPS fails** (error response, outage, unexpected response), it charges the flat rate and logs a warning ([line 37](../../app/Gateways/UpsShippingRateProvider.php#L37)), so a UPS problem never blocks a sale. |
+| [FlatRateShippingProvider](../../app/Gateways/FlatRateShippingProvider.php) | `UPS_CLIENT_ID` is empty, or as the UPS fallback                                                     | $45 UPS Ground (signature required) plus $5 of declared-value insurance per full $1,000 of the piece's price, 5 days.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                      |
 
-**Difference from Fable:** Fable had a shipping-quote endpoint but its
-checkout always set `shipping_cents = 0`, so shipping was never charged.
-Here the quote is part of checkout and included in the payment amount;
-there is no separate quote endpoint.
+`phpunit.xml` forces `UPS_CLIENT_ID` to empty, so tests never call UPS.
+
+**Setup** (`.env`): `UPS_CLIENT_ID`, `UPS_CLIENT_SECRET` (an app at
+developer.ups.com with the Rating and OAuth APIs), `UPS_ACCOUNT_NUMBER`
+(6-character shipper number), and the ship-from address
+(`UPS_SHIP_FROM_LINE1`, `_CITY`, `_STATE`, `_POSTAL_CODE`). `UPS_BASE_URL`
+defaults to the sandbox, `https://wwwcie.ups.com`; set it to
+`https://onlinetools.ups.com` for production.
+
+**Package size:** pieces don't store dimensions or weight yet, so every
+piece is rated as one default box, 24 × 20 × 4 in, 8 lb
+(`UPS_PACKAGE_LENGTH`/`_WIDTH`/`_HEIGHT`/`_WEIGHT`). Per-piece size and
+weight is a later change to the upload form.
+
+**Built from UPS's published OpenAPI spec** (UPS-API/api-documentation on
+GitHub) and tested with faked HTTP responses, not yet against the UPS
+sandbox. Check these in the sandbox once credentials exist, because the
+spec itself is ambiguous about them:
+
+- `Request.RequestOption` is listed as required but never defined; the
+  request omits it, as UPS's own examples do.
+- `DeclaredValue.MonetaryValue` is declared as exactly 8 characters, while
+  UPS's examples use values like `"100.00"`.
+- `DCISType "2"` means "signature required" at package level but "adult
+  signature" at shipment level; the request uses package level.
+- Declared value is capped by UPS at $5,000 (local); pieces above that
+  need a different insurance approach.
+
+**Differences from Fable:** Fable had a shipping-quote endpoint but its
+checkout always set `shipping_cents = 0`, so shipping was never charged,
+and it had no real UPS client, only a fake one. Here the quote is part of
+checkout and included in the payment amount, there is no separate quote
+endpoint, and live UPS rates are implemented.
 
 ## Running locally with Stripe test mode
 
@@ -170,6 +199,14 @@ In production, the webhook signing secret comes from the endpoint added
 in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Tests
+
+- [UpsShippingRateProviderTest.php](../../tests/Feature/UpsShippingRateProviderTest.php):
+  with UPS faked over HTTP, a quote logs in with Basic auth, sends a
+  Ground, signature-required, declared-value request from the shipper
+  account to the buyer's address, and returns the rate; the negotiated
+  rate wins; the token is reused; UPS errors, outages and unexpected
+  responses fall back to the flat rate with a warning; live UPS is used
+  only when credentials are set.
 
 - [CheckoutTest.php](../../tests/Feature/CheckoutTest.php) also covers
   shipping: the total is price + quoted shipping, a pending shipment
@@ -214,10 +251,9 @@ in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Roadmap
 
-| Commit | Adds                                                                                                    |
-| ------ | ------------------------------------------------------------------------------------------------------- |
-| 8      | Real UPS Rating API behind `ShippingRateProvider` (needs UPS developer credentials), flat-rate fallback |
-| 9      | Buy button and card form (`@stripe/stripe-js`)                                                          |
-| 10     | Order emails and a signed "view your order" link                                                        |
-| 11     | Admin orders: mark shipped, refund (calls Stripe, unlike Fable's)                                       |
-| 12     | Disputes and dashboard refunds via webhooks                                                             |
+| Commit | Adds                                                              |
+| ------ | ----------------------------------------------------------------- |
+| 9      | Buy button and card form (`@stripe/stripe-js`)                    |
+| 10     | Order emails and a signed "view your order" link                  |
+| 11     | Admin orders: mark shipped, refund (calls Stripe, unlike Fable's) |
+| 12     | Disputes and dashboard refunds via webhooks                       |
