@@ -96,8 +96,11 @@ Ported from the Fable version, with `user_id` replaced by `buyer_email`.
 - **A Stripe payment is recorded once.** `stripe_payment_intent_id` is
   unique.
 - **A webhook event is handled once.** `stripe_events_processed` has the
-  event id as its primary key; the handler inserts it first and skips the
-  event if it was already there.
+  event id as its primary key. The webhook handler inserts it in the same
+  transaction as the changes the event makes, and skips the event if the
+  id was already there. If applying the event fails, the insert rolls back
+  too, so Stripe's retry runs it again (see
+  [checkout.md](checkout.md#webhook-call-chain-payment-succeeded)).
 - **Statuses are valid.** Each status column has a CHECK constraint that
   mirrors its PHP enum; the enums also define which status changes are
   allowed (see [public-gallery.md](public-gallery.md#key-decisions)).

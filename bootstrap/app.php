@@ -17,6 +17,9 @@ return Application::configure(basePath: dirname(__DIR__))
     ->withMiddleware(function (Middleware $middleware): void {
         $middleware->encryptCookies(except: ['appearance']);
 
+        // Stripe can't send a CSRF token; the webhook verifies Stripe's signature instead.
+        $middleware->validateCsrfTokens(except: ['stripe/webhook']);
+
         $middleware->web(append: [
             HandleAppearance::class,
             HandleInertiaRequests::class,
