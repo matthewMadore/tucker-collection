@@ -55,11 +55,22 @@ test('guests can view a published piece with its images in position order', func
             ->where('artPiece.images', [
                 ['id' => $first->id, 'url' => 'http://localhost/storage/art-pieces/first.jpg'],
                 ['id' => $second->id, 'url' => 'http://localhost/storage/art-pieces/second.jpg'],
-            ]));
+            ])
+            ->where('holdMinutes', 20));
 });
 
 test('a draft piece is not found on the public site', function () {
     $draft = ArtPiece::factory()->create(['status' => 'draft']);
 
     $this->get(route('gallery.show', $draft))->assertNotFound();
+});
+
+test('the piece page gives the card form the Stripe publishable key, and only that key', function () {
+    config(['services.stripe.key' => 'pk_test_123', 'services.stripe.secret' => 'sk_test_secret']);
+    $piece = ArtPiece::factory()->create(['status' => 'published']);
+
+    $response = $this->get(route('gallery.show', $piece))
+        ->assertInertia(fn ($page) => $page->where('stripeKey', 'pk_test_123'));
+
+    expect($response->getContent())->not->toContain('sk_test_secret');
 });

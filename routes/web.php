@@ -11,6 +11,7 @@ Route::get('art/{artPiece}', [GalleryController::class, 'show'])->name('gallery.
 Route::post('art/{artPiece}/checkout', [CheckoutController::class, 'store'])
     ->middleware('throttle:checkout')
     ->name('checkout.store');
+Route::get('checkout/complete', [CheckoutController::class, 'complete'])->name('checkout.complete');
 Route::post('stripe/webhook', StripeWebhookController::class)->name('stripe.webhook');
 
 Route::middleware(['auth', 'verified'])->group(function () {

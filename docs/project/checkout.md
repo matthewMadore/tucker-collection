@@ -4,31 +4,32 @@ Guest checkout for a single piece, ported from the Fable version
 (`tucker-collection-fable-archive`) with fewer moving parts. Buyers don't
 need an account; the order stores their email.
 
-**Status (2026-11-14):** checkout (with server-quoted shipping), the
-payment webhook and hold expiry work end to end on the fake/flat-rate
-providers (verified in the running app). The real Stripe gateway and the
-live UPS rate provider are in place and switch on when their credentials
-are set; both are tested against recorded or faked HTTP, not yet against
-live Stripe test mode or the UPS sandbox. Not built yet: the card form,
-emails, and admin orders. See [Roadmap](#roadmap).
+**Status (2026-11-14):** buyers can check out from a piece's public page:
+shipping form, server-quoted UPS shipping, total, Stripe card form,
+confirmation page. Checkout, the webhook and hold expiry are verified end
+to end in the running app on the fake/flat-rate providers. The real
+Stripe gateway, Stripe's card form and the live UPS provider switch on
+when their keys are set; they're tested against recorded or faked HTTP,
+not yet against live Stripe test mode or the UPS sandbox. Not built yet:
+emails and admin orders. See [Roadmap](#roadmap).
 
 ## Checkout call chain
 
 `POST /art/{artPiece}/checkout` with `email` and `shipping_address`. No
 login; rate-limited. Returns JSON for the card form (not a page visit).
 
-| #   | Location                                                                           | Responsibility                                                                                                                                                                                                                                                               |
-| --- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:49](../../app/Providers/AppServiceProvider.php#L49)), against card-testing bots.                                                                                               |
-| 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                                                                                                                         |
-| 3   | [CheckoutController.php:19](../../app/Http/Controllers/CheckoutController.php#L19) | Drafts return 404, as on the public piece page.                                                                                                                                                                                                                              |
-| 4   | [CheckoutService.php:40](../../app/Services/CheckoutService.php#L40)               | One transaction for steps 5–9: any failure rolls everything back and the piece stays published.                                                                                                                                                                              |
-| 5   | [CheckoutService.php:44](../../app/Services/CheckoutService.php#L44)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."                                                                                                  |
-| 6   | [CheckoutService.php:59](../../app/Services/CheckoutService.php#L59)               | **Shipping quote** from the `ShippingRateProvider` (UPS) for this piece and address, on the server.                                                                                                                                                                          |
-| 7   | [CheckoutService.php:61](../../app/Services/CheckoutService.php#L61)               | Pending order: subtotal from the piece row, shipping from the quote, total = both. Plus an order item snapshotting name and price, and a pending shipment recording carrier, service level and quoted rate ([line 76](../../app/Services/CheckoutService.php#L76)).          |
-| 8   | [CheckoutService.php:82](../../app/Services/CheckoutService.php#L82)               | `PaymentGateway::createIntent($order)`: the amount is the order total.                                                                                                                                                                                                       |
-| 9   | [CheckoutService.php:84](../../app/Services/CheckoutService.php#L84)               | Pending payment row with the gateway's intent id.                                                                                                                                                                                                                            |
-| 10  | Response                                                                           | `201 { order_id, subtotal_cents, shipping_cents, total_cents, currency, shipping: { carrier, service_level, estimated_days }, client_secret }`. The card form shows the shipping and total before the buyer pays. The client secret goes to the browser and is never stored. |
+| #   | Location                                                                           | Responsibility                                                                                                                                                                                                                                                      |
+| --- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:49](../../app/Providers/AppServiceProvider.php#L49)), against card-testing bots.                                                                                      |
+| 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                                                                                                                |
+| 3   | [CheckoutController.php:23](../../app/Http/Controllers/CheckoutController.php#L23) | Drafts return 404, as on the public piece page.                                                                                                                                                                                                                     |
+| 4   | [CheckoutService.php:40](../../app/Services/CheckoutService.php#L40)               | One transaction for steps 5–9: any failure rolls everything back and the piece stays published.                                                                                                                                                                     |
+| 5   | [CheckoutService.php:44](../../app/Services/CheckoutService.php#L44)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."                                                                                         |
+| 6   | [CheckoutService.php:59](../../app/Services/CheckoutService.php#L59)               | **Shipping quote** from the `ShippingRateProvider` (UPS) for this piece and address, on the server.                                                                                                                                                                 |
+| 7   | [CheckoutService.php:61](../../app/Services/CheckoutService.php#L61)               | Pending order: subtotal from the piece row, shipping from the quote, total = both. Plus an order item snapshotting name and price, and a pending shipment recording carrier, service level and quoted rate ([line 76](../../app/Services/CheckoutService.php#L76)). |
+| 8   | [CheckoutService.php:82](../../app/Services/CheckoutService.php#L82)               | `PaymentGateway::createIntent($order)`: the amount is the order total.                                                                                                                                                                                              |
+| 9   | [CheckoutService.php:84](../../app/Services/CheckoutService.php#L84)               | Pending payment row with the gateway's intent id.                                                                                                                                                                                                                   |
+| 10  | Response                                                                           | `201 { subtotal_cents, shipping_cents, total_cents, shipping: { service_level, estimated_days }, client_secret }`: only what the card form uses. The client secret goes to the browser and is never stored.                                                         |
 
 ## Webhook call chain: payment succeeded
 
@@ -38,7 +39,7 @@ retried by Stripe, and arrives even if the buyer closes the tab.
 
 | #   | Location                                                                                           | Responsibility                                                                                                                                                               |
 | --- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:14](../../routes/web.php#L14), [bootstrap/app.php:21](../../bootstrap/app.php#L21) | Public route, excluded from CSRF (Stripe can't send a token; the signature replaces it).                                                                                     |
+| 1   | [routes/web.php:15](../../routes/web.php#L15), [bootstrap/app.php:21](../../bootstrap/app.php#L21) | Public route, excluded from CSRF (Stripe can't send a token; the signature replaces it).                                                                                     |
 | 2   | [StripeWebhookController.php:21](../../app/Http/Controllers/StripeWebhookController.php#L21)       | No `STRIPE_WEBHOOK_SECRET` → 500 and log. An empty secret would let anyone sign a fake event.                                                                                |
 | 3   | [StripeWebhookController.php:28](../../app/Http/Controllers/StripeWebhookController.php#L28)       | `Stripe\Webhook::constructEvent()` checks the HMAC signature and rejects events older than 5 minutes → 400.                                                                  |
 | 4   | [StripeWebhookHandler.php:30](../../app/Services/StripeWebhookHandler.php#L30)                     | One transaction for steps 5–9.                                                                                                                                               |
@@ -65,6 +66,25 @@ acknowledged (200) so Stripe stops retrying; unknown intents are logged.
 - **Signature check from the Stripe SDK** (`stripe/stripe-php`) instead of
   Fable's hand-written one, and no simulated webhook job: locally, the
   real Stripe test mode and `stripe listen` replace it.
+
+## Buying: the piece page
+
+What a buyer sees on a published piece's public page
+([gallery/Show.vue:57](../../resources/js/pages/gallery/Show.vue#L57)).
+Held and sold pieces show "reserved by another buyer" / "sold" instead.
+
+| #   | Location                                                                           | What happens                                                                                                                                                                                                                                                                                                                                                                              |
+| --- | ---------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [BuyArtPiece.vue](../../resources/js/components/BuyArtPiece.vue)                   | **Buy this piece · $price** opens a shipping form (US addresses only, for now). Fields carry `autocomplete`/`inputmode` hints, so iPhone autofill and the numeric keypad work.                                                                                                                                                                                                            |
+| 2   | [BuyArtPiece.vue:86](../../resources/js/components/BuyArtPiece.vue#L86)            | **Continue to payment** posts to checkout with Inertia's `useHttp`. Validation errors (422) appear under their fields. Any other failure, such as 409 "no longer available" or 429, is shown as a message, and the page reloads the piece's status ([line 90](../../resources/js/components/BuyArtPiece.vue#L90)), so a buyer who lost the race sees "reserved by another buyer".         |
+| 3   | Same component                                                                     | Shows piece + UPS shipping (service and days) = total, and "reserved for you for 20 minutes".                                                                                                                                                                                                                                                                                             |
+| 4   | [BuyArtPiece.vue:108](../../resources/js/components/BuyArtPiece.vue#L108)          | Loads Stripe.js with the **publishable** key (`STRIPE_KEY`, passed as a page prop by [GalleryController.php:55](../../app/Http/Controllers/GalleryController.php#L55); the secret key never reaches the browser) and mounts Stripe's Payment Element with the client secret. Without `STRIPE_KEY` it says card payments aren't set up, so the flow can be tried locally up to this point. |
+| 5   | [BuyArtPiece.vue:128](../../resources/js/components/BuyArtPiece.vue#L128)          | **Pay $total** calls `stripe.confirmPayment()`. A declined card shows Stripe's message and the buyer can try another card while the hold lasts. On success Stripe redirects to `/checkout/complete`.                                                                                                                                                                                      |
+| 6   | [CheckoutController.php:48](../../app/Http/Controllers/CheckoutController.php#L48) | The confirmation page looks the order up by the PaymentIntent id and shows **our** order status ("Thank you!" when paid, "Payment processing" while waiting for the webhook, "wasn't completed" if the hold ended). It ignores Stripe's `redirect_status` query parameter: only the webhook marks orders paid.                                                                            |
+
+**Card payments need both Stripe keys:** `STRIPE_KEY` (publishable, for the
+browser) and `STRIPE_SECRET` (for the server). With only the publishable
+key, the fake gateway's client secret can't be used by Stripe.js.
 
 ## Hold expiry
 
@@ -200,6 +220,17 @@ in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Tests
 
+- Buy flow: [CheckoutTest.php](../../tests/Feature/CheckoutTest.php)
+  covers the confirmation page (it shows the order's real status for
+  paid, pending and cancelled orders even when the redirect claims
+  success; unknown payments → 404), and
+  [GalleryTest.php](../../tests/Feature/GalleryTest.php) checks the piece
+  page passes the publishable key and never the secret key. In a browser
+  (iPhone and desktop): two buyers compete for one piece; the first sees
+  $100 + $45 = $145 and is reserved, the second is told it's no longer
+  available and the Buy button disappears; the confirmation page shows
+  "Payment processing" and then "Thank you!" once paid.
+
 - [UpsShippingRateProviderTest.php](../../tests/Feature/UpsShippingRateProviderTest.php):
   with UPS faked over HTTP, a quote logs in with Basic auth, sends a
   Ground, signature-required, declared-value request from the shipper
@@ -253,7 +284,19 @@ in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 | Commit | Adds                                                              |
 | ------ | ----------------------------------------------------------------- |
-| 9      | Buy button and card form (`@stripe/stripe-js`)                    |
 | 10     | Order emails and a signed "view your order" link                  |
 | 11     | Admin orders: mark shipped, refund (calls Stripe, unlike Fable's) |
 | 12     | Disputes and dashboard refunds via webhooks                       |
+
+## Known gaps
+
+- **Not yet run with real Stripe:** the card form, `confirmPayment()` and
+  the redirect have only run without a Stripe key. Try a full test-mode
+  payment once `STRIPE_KEY`/`STRIPE_SECRET` are set (cards `4242…` success,
+  `4000 0000 0000 0002` decline, `4000 0027 6000 3184` 3D Secure).
+- **US shipping only:** the form sends `country: US`; international needs
+  a country field and UPS international services.
+- **Buy section placement on phones:** on pieces with many photos it sits
+  below all the thumbnails, so buyers scroll to find it.
+- **One default box size** for UPS rates until pieces store size and
+  weight.

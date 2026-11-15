@@ -29,6 +29,9 @@ return [
     ],
 
     'stripe' => [
+        // Publishable key (pk_test_... / pk_live_...) for the card form in the
+        // browser. Safe to expose; the secret key below is not.
+        'key' => env('STRIPE_KEY'),
         // Secret key (sk_test_... / sk_live_...). When empty, the app uses the
         // fake payment gateway, so local development works without Stripe.
         'secret' => env('STRIPE_SECRET'),

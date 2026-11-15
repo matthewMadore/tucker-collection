@@ -4,6 +4,7 @@ namespace App\Http\Controllers;
 
 use App\Models\ArtPiece;
 use App\Models\ArtPieceImage;
+use App\Services\CheckoutService;
 use Inertia\Inertia;
 use Inertia\Response;
 
@@ -51,6 +52,8 @@ class GalleryController extends Controller
                     'url' => $image->url,
                 ])->all(),
             ],
+            'stripeKey' => config('services.stripe.key'),
+            'holdMinutes' => CheckoutService::HOLD_MINUTES,
         ]);
     }
 }

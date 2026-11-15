@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { Head, Link } from '@inertiajs/vue3';
 import ArtPieceImageGallery from '@/components/ArtPieceImageGallery.vue';
+import BuyArtPiece from '@/components/BuyArtPiece.vue';
 import { Badge } from '@/components/ui/badge';
 import { home } from '@/routes';
 
@@ -17,6 +18,8 @@ defineProps<{
             url: string;
         }[];
     };
+    stripeKey: string | null;
+    holdMinutes: number;
 }>();
 </script>
 
@@ -49,6 +52,22 @@ defineProps<{
                     class="text-muted-foreground whitespace-pre-line"
                 >
                     {{ artPiece.description }}
+                </p>
+
+                <BuyArtPiece
+                    v-if="artPiece.status === 'published'"
+                    :key="artPiece.id"
+                    :art-piece-id="artPiece.id"
+                    :price-cents="artPiece.price_cents"
+                    :stripe-key="stripeKey"
+                    :hold-minutes="holdMinutes"
+                />
+                <p v-else class="text-muted-foreground text-sm">
+                    {{
+                        artPiece.status === 'sold'
+                            ? 'This piece has been sold.'
+                            : 'This piece is reserved by another buyer.'
+                    }}
                 </p>
             </section>
         </div>
