@@ -43,14 +43,6 @@ class ArtPiece extends Model
     }
 
     /**
-     * @return HasMany<OrderItem, $this>
-     */
-    public function orderItems(): HasMany
-    {
-        return $this->hasMany(OrderItem::class);
-    }
-
-    /**
      * Pieces visitors can see in the public gallery (everything but drafts).
      *
      * @param  Builder<self>  $query
