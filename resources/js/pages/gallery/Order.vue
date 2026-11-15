@@ -11,6 +11,7 @@ defineProps<{
         total_cents: number;
         buyer_email: string;
         shipping_address: Record<string, string | null>;
+        tracking_number: string | null;
     };
 }>();
 
@@ -45,6 +46,20 @@ const dollars = (cents: number): string => `$${(cents / 100).toFixed(2)}`;
             <p v-else-if="order.status === 'paid'">
                 Your payment is confirmed. We'll email {{ order.buyer_email }}
                 the tracking number once it ships.
+            </p>
+            <p v-else-if="order.status === 'refunded'">
+                Your payment was refunded to your card. It can take 5–10
+                business days to appear on your statement.
+            </p>
+            <p v-if="order.tracking_number && order.status !== 'refunded'">
+                UPS tracking:
+                <a
+                    :href="`https://www.ups.com/track?tracknum=${encodeURIComponent(order.tracking_number)}`"
+                    class="font-medium underline underline-offset-4"
+                    target="_blank"
+                    rel="noopener"
+                    >{{ order.tracking_number }}</a
+                >
             </p>
         </div>
 

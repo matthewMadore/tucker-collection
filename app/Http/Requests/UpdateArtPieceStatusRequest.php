@@ -33,6 +33,12 @@ class UpdateArtPieceStatusRequest extends FormRequest
         return [
             function (Validator $validator): void {
                 $artPiece = $this->route('artPiece');
+
+                if ($artPiece instanceof ArtPiece && $artPiece->hasOpenOrder()) {
+                    $validator->errors()->add('status', __('This piece has an open order. Ship or refund it from Sales instead.'));
+
+                    return;
+                }
                 $to = ArtPieceStatus::tryFrom((string) $this->input('status'));
 
                 if ($artPiece instanceof ArtPiece && $to !== null && ! $artPiece->status->canTransitionTo($to)) {

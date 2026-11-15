@@ -8,6 +8,7 @@ import { show as publicShow } from '@/actions/App/Http/Controllers/GalleryContro
 import ArtPieceImageGallery from '@/components/ArtPieceImageGallery.vue';
 import InputError from '@/components/InputError.vue';
 import { Button } from '@/components/ui/button';
+import { index as sales } from '@/actions/App/Http/Controllers/SalesController';
 import { dashboard } from '@/routes';
 
 const props = defineProps<{
@@ -18,6 +19,7 @@ const props = defineProps<{
         price_cents: number;
         status: string;
         allowed_statuses: string[];
+        has_open_order: boolean;
         images: {
             id: number;
             url: string;
@@ -103,6 +105,13 @@ function changeStatus(status: string): void {
                         {{ status.label }}
                     </Button>
                 </div>
+                <p
+                    v-if="artPiece.has_open_order"
+                    class="text-muted-foreground text-sm"
+                >
+                    This piece has an open order, so its status changes through
+                    <Link :href="sales()" class="underline">Sales</Link>.
+                </p>
                 <InputError :message="statusForm.errors.status" />
                 <p class="text-muted-foreground text-sm">
                     <template v-if="artPiece.status === 'draft'">

@@ -1,7 +1,7 @@
 <script setup lang="ts">
-import { Link, usePage } from '@inertiajs/vue3';
-import { Folder, Images, LayoutGrid, Menu } from '@lucide/vue';
-import { computed } from 'vue';
+import { Link, router, usePage } from '@inertiajs/vue3';
+import { Folder, Images, LayoutGrid, Menu, Receipt } from '@lucide/vue';
+import { computed, onUnmounted, ref } from 'vue';
 import AppLogo from '@/components/AppLogo.vue';
 import AppLogoIcon from '@/components/AppLogoIcon.vue';
 import Breadcrumbs from '@/components/Breadcrumbs.vue';
@@ -35,6 +35,7 @@ import UserMenuContent from '@/components/UserMenuContent.vue';
 import { useCurrentUrl } from '@/composables/useCurrentUrl';
 import { getInitials } from '@/composables/useInitials';
 import { toUrl } from '@/lib/utils';
+import { index as sales } from '@/actions/App/Http/Controllers/SalesController';
 import { dashboard, home } from '@/routes';
 import type { BreadcrumbItem, NavItem } from '@/types';
 
@@ -50,6 +51,11 @@ const page = usePage();
 const auth = computed(() => page.props.auth);
 const { isCurrentUrl, whenCurrentUrl } = useCurrentUrl();
 
+// The header stays mounted between admin pages, so close the phone menu
+// after it navigates instead of leaving it open over the new page.
+const isMenuOpen = ref(false);
+onUnmounted(router.on('navigate', () => (isMenuOpen.value = false)));
+
 const activeItemStyles =
     'text-neutral-900 dark:bg-neutral-800 dark:text-neutral-100';
 
@@ -58,6 +64,11 @@ const mainNavItems: NavItem[] = [
         title: 'Dashboard',
         href: dashboard(),
         icon: LayoutGrid,
+    },
+    {
+        title: 'Sales',
+        href: sales(),
+        icon: Receipt,
     },
     {
         title: 'Gallery',
@@ -81,7 +92,7 @@ const rightNavItems: NavItem[] = [
             <div class="mx-auto flex h-16 items-center px-4 md:max-w-7xl">
                 <!-- Mobile Menu -->
                 <div class="lg:hidden">
-                    <Sheet>
+                    <Sheet v-model:open="isMenuOpen">
                         <SheetTrigger :as-child="true">
                             <Button
                                 variant="ghost"

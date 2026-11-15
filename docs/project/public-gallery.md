@@ -41,27 +41,27 @@ accounts are created from the command line.
 | GET    | `/`                             | `home`                     | public            | [GalleryController::index](../../app/Http/Controllers/GalleryController.php#L15)          |
 | GET    | `/art/{artPiece}`               | `gallery.show`             | public, non-draft | [GalleryController::show](../../app/Http/Controllers/GalleryController.php#L35)           |
 | GET    | `/art-pieces/{artPiece}`        | `art-pieces.show`          | auth + verified   | [ArtPieceController::show](../../app/Http/Controllers/ArtPieceController.php#L40)         |
-| PATCH  | `/art-pieces/{artPiece}/status` | `art-pieces.status.update` | auth + verified   | [ArtPieceController::updateStatus](../../app/Http/Controllers/ArtPieceController.php#L60) |
+| PATCH  | `/art-pieces/{artPiece}/status` | `art-pieces.status.update` | auth + verified   | [ArtPieceController::updateStatus](../../app/Http/Controllers/ArtPieceController.php#L63) |
 
-Defined in [routes/web.php](../../routes/web.php#L10).
+Defined in [routes/web.php](../../routes/web.php#L11).
 
 ## Call chain: publishing a piece
 
-| #   | Location                                                                                   | Responsibility                                                                                         |
-| --- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
-| 1   | [art-pieces/Show.vue:42](../../resources/js/pages/art-pieces/Show.vue#L42)                 | `changeStatus()` sends `PATCH /art-pieces/{id}/status` with `{ status }` via `useForm`.                |
-| 2   | [routes/web.php:23](../../routes/web.php#L23)                                              | Inside the `auth` + `verified` group: guests are redirected to login.                                  |
-| 3   | [UpdateArtPieceStatusRequest.php](../../app/Http/Requests/UpdateArtPieceStatusRequest.php) | `Rule::enum(ArtPieceStatus::class)`: anything else fails with "The selected status is invalid."        |
-| 4   | [ArtPieceController.php:60](../../app/Http/Controllers/ArtPieceController.php#L60)         | Saves the status, flashes the toast, redirects back. Inertia reloads the page props.                   |
-| 5   | Postgres                                                                                   | The `status_valid` CHECK constraint rejects unknown values even if application validation is bypassed. |
+| #   | Location                                                                                   | Responsibility                                                                                                                                 |
+| --- | ------------------------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [art-pieces/Show.vue:45](../../resources/js/pages/art-pieces/Show.vue#L45)                 | `changeStatus()` sends `PATCH /art-pieces/{id}/status` with `{ status }` via `useForm`.                                                        |
+| 2   | [routes/web.php:24](../../routes/web.php#L24)                                              | Inside the `auth` + `verified` group: guests are redirected to login.                                                                          |
+| 3   | [UpdateArtPieceStatusRequest.php](../../app/Http/Requests/UpdateArtPieceStatusRequest.php) | `Rule::enum(ArtPieceStatus::class)`: anything else fails with "The selected status is invalid." A piece with an open order is refused (below). |
+| 4   | [ArtPieceController.php:63](../../app/Http/Controllers/ArtPieceController.php#L63)         | Saves the status, flashes the toast, redirects back. Inertia reloads the page props.                                                           |
+| 5   | Postgres                                                                                   | The `status_valid` CHECK constraint rejects unknown values even if application validation is bypassed.                                         |
 
 ## Call chain: a visitor opens the gallery
 
 | #   | Location                                                                         | Responsibility                                                                                             |
 | --- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:10](../../routes/web.php#L10)                                    | Public route, no middleware beyond `web`.                                                                  |
+| 1   | [routes/web.php:11](../../routes/web.php#L11)                                    | Public route, no middleware beyond `web`.                                                                  |
 | 2   | [GalleryController.php:15](../../app/Http/Controllers/GalleryController.php#L15) | `ArtPiece::visibleToPublic()`, images eager-loaded in `position` order, paginated.                         |
-| 3   | [ArtPiece.php:47](../../app/Models/ArtPiece.php#L47)                             | The `visibleToPublic` scope: `WHERE status IN ('published', 'held', 'sold')`.                              |
+| 3   | [ArtPiece.php:70](../../app/Models/ArtPiece.php#L70)                             | The `visibleToPublic` scope: `WHERE status IN ('published', 'held', 'sold')`.                              |
 | 4   | [gallery/Index.vue](../../resources/js/pages/gallery/Index.vue)                  | Renders inside [PublicLayout.vue](../../resources/js/layouts/PublicLayout.vue) (logo, Log in / Dashboard). |
 
 ## Key decisions
@@ -80,6 +80,15 @@ Defined in [routes/web.php](../../routes/web.php#L10).
   model (`transitionTo($status, [extra columns])`, which throws on an
   illegal move and saves nothing). The admin request rejects an illegal
   move with "Can't change status from Sold to Draft."
+- **Open orders lock the status buttons:** while a piece has an order
+  item that isn't voided (a checkout in progress, or a paid or shipped
+  order), checkout, hold expiry, shipping and refunds own its status. The
+  buttons are disabled with a link to Sales, and the request refuses any
+  change ([ArtPiece::hasOpenOrder()](../../app/Models/ArtPiece.php)).
+  Otherwise, relisting a held piece mid-checkout would let a second buyer
+  collide with the first. Cancelled and refunded orders void their item,
+  so after a shipped piece is refunded and returned, Sold → Published
+  relists it.
 
     | From      | Allowed to                        |
     | --------- | --------------------------------- |

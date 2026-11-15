@@ -40,6 +40,7 @@ class ArtPieceController extends Controller
     public function show(ArtPiece $artPiece): Response
     {
         $artPiece->load(['images' => fn ($query) => $query->orderBy('position')]);
+        $hasOpenOrder = $artPiece->hasOpenOrder();
 
         return Inertia::render('art-pieces/Show', [
             'artPiece' => [
@@ -48,7 +49,8 @@ class ArtPieceController extends Controller
                 'description' => $artPiece->description,
                 'price_cents' => $artPiece->price_cents,
                 'status' => $artPiece->status->value,
-                'allowed_statuses' => array_map(fn (ArtPieceStatus $status) => $status->value, $artPiece->status->allowedTransitions()),
+                'allowed_statuses' => $hasOpenOrder ? [] : array_map(fn (ArtPieceStatus $status) => $status->value, $artPiece->status->allowedTransitions()),
+                'has_open_order' => $hasOpenOrder,
                 'images' => $artPiece->images->map(fn (ArtPieceImage $image) => [
                     'id' => $image->id,
                     'url' => $image->url,

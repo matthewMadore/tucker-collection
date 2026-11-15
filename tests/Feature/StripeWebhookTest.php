@@ -1,5 +1,6 @@
 <?php
 
+use App\Contracts\PaymentGateway;
 use App\Enums\ArtPieceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -189,8 +190,19 @@ test('if applying an event fails, nothing is recorded, so Stripe\'s retry applie
     Mail::assertQueued(OrderConfirmed::class, 1);
 });
 
-test('a payment that lands after its order was cancelled is flagged for a refund, not sold', function () {
+test('if the late-payment refund fails, the webhook fails so Stripe retries it', function () {
+    $this->order->update(['status' => 'cancelled']);
+    $this->payment->update(['status' => 'failed']);
+    $this->mock(PaymentGateway::class)->shouldReceive('refund')->andThrow(new RuntimeException('Stripe is down.'));
+
+    ($this->deliver)(($this->succeeded)())->assertServerError();
+
+    expect(DB::table('stripe_events_processed')->count())->toBe(0);
+});
+
+test('a payment that lands after its order was cancelled is refunded, not sold', function () {
     Log::spy();
+    $this->mock(PaymentGateway::class)->shouldReceive('refund')->once()->with('pi_test_1');
     // The hold expired and was released before the payment landed.
     $this->order->update(['status' => 'cancelled']);
     $this->payment->update(['status' => 'failed']);
@@ -202,5 +214,5 @@ test('a payment that lands after its order was cancelled is flagged for a refund
         ->and($this->payment->fresh()->status)->toBe(PaymentStatus::Failed)
         ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Published);
     Mail::assertNothingQueued();
-    Log::shouldHaveReceived('critical')->withArgs(fn (string $message) => str_contains($message, 'refund it'))->once();
+    Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, 'refunded it'))->once();
 });

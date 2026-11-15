@@ -23,4 +23,11 @@ interface PaymentGateway
      * succeeded.
      */
     public function cancelIntent(string $intentId): void;
+
+    /**
+     * Refund a succeeded payment in full. Safe to call twice for the same
+     * payment: the second call returns the first refund instead of making
+     * another.
+     */
+    public function refund(string $intentId): void;
 }

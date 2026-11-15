@@ -19,4 +19,6 @@ class FakeStripePaymentGateway implements PaymentGateway
     }
 
     public function cancelIntent(string $intentId): void {}
+
+    public function refund(string $intentId): void {}
 }

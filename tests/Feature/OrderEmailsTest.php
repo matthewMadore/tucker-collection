@@ -2,6 +2,7 @@
 
 use App\Mail\OrderConfirmed;
 use App\Mail\OrderReceived;
+use App\Mail\OrderUpdated;
 use App\Models\ArtPiece;
 use App\Models\Order;
 use App\Models\OrderItem;
@@ -58,4 +59,39 @@ test('order emails wait for the payment transaction, so a rolled-back payment se
     DB::transaction(fn () => Mail::to('someone@example.com')->queue(new $mailable($this->order)));
 
     expect(app('mailer')->getSymfonyTransport()->messages())->toHaveCount(1);
-})->with([OrderConfirmed::class, OrderReceived::class]);
+})->with([OrderConfirmed::class, OrderReceived::class, OrderUpdated::class]);
+
+test('the shipped email has the tracking number and a UPS tracking link', function () {
+    $this->order->shipment->update(['tracking_number' => '1Z999AA10123456784']);
+    $this->order->update(['status' => 'fulfilled']);
+    $mail = new OrderUpdated($this->order->fresh());
+
+    $mail->assertHasSubject('Your order has shipped');
+    $mail->assertSeeInHtml('Charcoal Owl')
+        ->assertSeeInHtml('1Z999AA10123456784')
+        ->assertSeeInHtml('https://www.ups.com/track?tracknum=1Z999AA10123456784')
+        ->assertSeeInHtml($this->order->viewUrl());
+});
+
+test('the refund email has the amount and the order link', function () {
+    $this->order->update(['status' => 'refunded']);
+    $mail = new OrderUpdated($this->order->fresh());
+
+    $mail->assertHasSubject('Your order has been refunded');
+    $mail->assertSeeInHtml('$465.00')
+        ->assertSeeInHtml('Charcoal Owl')
+        ->assertDontSeeInHtml('tracking')
+        ->assertSeeInHtml($this->order->viewUrl());
+});
+
+test('an email queued when an order ships still says shipped if it\'s refunded before sending', function () {
+    $this->order->update(['status' => 'fulfilled']);
+    $mail = new OrderUpdated($this->order->fresh());
+    $this->order->update(['status' => 'refunded']);
+
+    // Like the queue does: the worker reloads the order from the database.
+    $sent = unserialize(serialize($mail));
+
+    expect($sent->order->status->value)->toBe('refunded');
+    $sent->assertHasSubject('Your order has shipped');
+});

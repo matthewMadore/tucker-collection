@@ -31,6 +31,7 @@ test('the art piece page shows its details and image URLs in position order', fu
             ->where('artPiece.price_cents', 4999)
             ->where('artPiece.status', 'draft')
             ->where('artPiece.allowed_statuses', ['published', 'sold'])
+            ->where('artPiece.has_open_order', false)
             ->where('artPiece.images', [
                 ['id' => $first->id, 'url' => 'http://localhost/storage/art-pieces/first.jpg'],
                 ['id' => $second->id, 'url' => 'http://localhost/storage/art-pieces/second.jpg'],

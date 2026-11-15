@@ -43,6 +43,25 @@ class ArtPiece extends Model
     }
 
     /**
+     * @return HasMany<OrderItem, $this>
+     */
+    public function orderItems(): HasMany
+    {
+        return $this->hasMany(OrderItem::class);
+    }
+
+    /**
+     * A checkout, payment or shipment is in progress for this piece. Its
+     * status then belongs to checkout, hold expiry, shipping and refunds,
+     * not to the status buttons. (Cancelled and refunded orders void their
+     * item, so they don't count.)
+     */
+    public function hasOpenOrder(): bool
+    {
+        return $this->orderItems()->whereNull('voided_at')->exists();
+    }
+
+    /**
      * Pieces visitors can see in the public gallery (everything but drafts).
      *
      * @param  Builder<self>  $query

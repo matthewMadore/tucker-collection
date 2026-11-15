@@ -111,15 +111,7 @@ test('checkout requires a valid email and a full shipping address', function () 
 });
 
 test('if the payment gateway fails, nothing is saved and the piece stays published', function () {
-    $this->app->bind(PaymentGateway::class, fn () => new class implements PaymentGateway
-    {
-        public function createIntent(Order $order): never
-        {
-            throw new RuntimeException('Stripe is down.');
-        }
-
-        public function cancelIntent(string $intentId): void {}
-    });
+    $this->mock(PaymentGateway::class)->shouldReceive('createIntent')->andThrow(new RuntimeException('Stripe is down.'));
     $piece = ArtPiece::factory()->create(['status' => 'published']);
 
     $this->postJson(route('checkout.store', $piece), $this->payload)->assertServerError();

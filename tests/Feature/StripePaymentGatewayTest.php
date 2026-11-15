@@ -93,6 +93,28 @@ test('cancelling a payment that already succeeded throws, so the hold is kept', 
     $this->gateway->cancelIntent('pi_123');
 })->throws(InvalidRequestException::class, 'This PaymentIntent has already succeeded.');
 
+test('refunding a payment refunds it in full with one idempotency key per payment', function () {
+    $http = ($this->useStripeResponses)([200, ['id' => 're_123', 'object' => 'refund', 'status' => 'succeeded']]);
+
+    $this->gateway->refund('pi_123');
+
+    expect($http->requests[0]['url'])->toBe('https://api.stripe.com/v1/refunds')
+        ->and($http->requests[0]['params'])->toBe(['payment_intent' => 'pi_123'])
+        ->and($http->requests[0]['headers'])->toContain('Idempotency-Key: refund-pi_123');
+});
+
+test('refunding a payment that is already refunded is not an error', function () {
+    ($this->useStripeResponses)([400, ['error' => ['type' => 'invalid_request_error', 'code' => 'charge_already_refunded', 'message' => 'Charge ch_123 has already been refunded.']]]);
+
+    $this->gateway->refund('pi_123');
+})->throwsNoExceptions();
+
+test('any other refund error throws, so nothing is marked refunded', function () {
+    ($this->useStripeResponses)([400, ['error' => ['type' => 'invalid_request_error', 'code' => 'charge_disputed', 'message' => 'Charge ch_123 has been charged back.']]]);
+
+    $this->gateway->refund('pi_123');
+})->throws(InvalidRequestException::class, 'charged back');
+
 test('the app uses real Stripe only when a secret key is configured', function (?string $secret, string $gateway) {
     config(['services.stripe.secret' => $secret]);
 

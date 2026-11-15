@@ -2,6 +2,7 @@
 
 namespace App\Services;
 
+use App\Contracts\PaymentGateway;
 use App\Enums\ArtPieceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
@@ -21,6 +22,8 @@ use Illuminate\Support\Facades\Mail;
  */
 class StripeWebhookHandler
 {
+    public function __construct(private readonly PaymentGateway $gateway) {}
+
     /**
      * Recording the event and applying it happen in one transaction: if
      * applying fails, the event isn't recorded either, so Stripe's retry
@@ -75,9 +78,12 @@ class StripeWebhookHandler
         // The hold expired and the order was cancelled before the payment
         // landed. Expiry cancels the payment at Stripe first, so this should
         // be rare, but if it happens the buyer was charged for a piece that's
-        // back on sale: flag it for a refund instead of selling it.
+        // back on sale: refund them instead of selling it. If the refund
+        // fails, the webhook fails and Stripe's retry tries again.
         if ($order->status !== OrderStatus::Pending) {
-            Log::critical('Stripe payment succeeded for an order that is no longer pending; refund it.', [
+            $this->gateway->refund($payment->stripe_payment_intent_id);
+
+            Log::warning('Stripe payment succeeded for an order that is no longer pending; refunded it.', [
                 'event' => $eventId,
                 'payment_id' => $payment->id,
                 'order_id' => $order->id,

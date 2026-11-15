@@ -45,4 +45,21 @@ class StripePaymentGateway implements PaymentGateway
             }
         }
     }
+
+    public function refund(string $intentId): void
+    {
+        try {
+            $this->stripe->refunds->create(['payment_intent' => $intentId], [
+                // One refund per payment, however many times staff click
+                // Refund or the late-payment webhook is retried.
+                'idempotency_key' => "refund-{$intentId}",
+            ]);
+        } catch (InvalidRequestException $exception) {
+            // Stripe forgets idempotency keys after 24 hours; a later retry
+            // gets this error instead, and the money is already back.
+            if ($exception->getStripeCode() !== 'charge_already_refunded') {
+                throw $exception;
+            }
+        }
+    }
 }

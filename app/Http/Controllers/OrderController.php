@@ -14,7 +14,7 @@ class OrderController extends Controller
 {
     public function show(Order $order): Response
     {
-        $order->load('items');
+        $order->load(['items', 'shipment']);
 
         return Inertia::render('gallery/Order', [
             'order' => [
@@ -25,6 +25,7 @@ class OrderController extends Controller
                 'total_cents' => $order->total_cents,
                 'buyer_email' => $order->buyer_email,
                 'shipping_address' => $order->shipping_address,
+                'tracking_number' => $order->shipment?->tracking_number,
             ],
         ]);
     }
