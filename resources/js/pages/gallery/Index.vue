@@ -9,7 +9,8 @@ defineProps<{
         data: {
             id: number;
             name: string;
-            price_cents: number;
+            /** null in gallery-only mode */
+            price_cents: number | null;
             status: string;
             status_label: string;
             cover_image_url: string | null;
@@ -58,7 +59,10 @@ defineProps<{
                     <p class="truncate text-sm font-medium sm:text-base">
                         {{ artPiece.name }}
                     </p>
-                    <p class="text-muted-foreground text-sm">
+                    <p
+                        v-if="artPiece.price_cents !== null"
+                        class="text-muted-foreground text-sm"
+                    >
                         ${{ (artPiece.price_cents / 100).toFixed(2) }}
                     </p>
                 </div>

@@ -18,8 +18,8 @@ class CheckoutController extends Controller
      */
     public function store(CheckoutRequest $request, ArtPiece $artPiece, CheckoutService $checkout): JsonResponse
     {
-        // Drafts don't exist publicly: 404, as on the public piece page.
-        abort_unless($artPiece->status->isPublic(), 404);
+        // Gallery-only mode takes no orders; drafts don't exist publicly.
+        abort_unless(config('shop.enabled') && $artPiece->status->isPublic(), 404);
 
         ['order' => $order, 'clientSecret' => $clientSecret, 'shipping' => $shipping] = $checkout->checkout(
             $artPiece,

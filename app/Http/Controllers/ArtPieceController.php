@@ -11,6 +11,7 @@ use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\UploadedFile;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Storage;
+use Imagick;
 use Inertia\Inertia;
 use Inertia\Response;
 use RuntimeException;
@@ -83,6 +84,7 @@ class ArtPieceController extends Controller
 
         try {
             foreach ($uploadedImages as $image) {
+                $this->stripMetadata($image);
                 $path = $image->store('art-pieces', ArtPieceImage::DISK);
 
                 if ($path === false) {
@@ -115,5 +117,28 @@ class ArtPieceController extends Controller
         Inertia::flash('toast', ['type' => 'success', 'message' => __('Art piece added.')]);
 
         return redirect()->back();
+    }
+
+    /**
+     * Photos are public, and phone photos carry EXIF metadata: often the GPS
+     * location they were taken at (home), plus device details. Rewrites the
+     * upload without it. The rotation tag goes too, so the rotation is applied
+     * to the pixels first; the color profile is kept, so wide-gamut (Display
+     * P3) phone photos of art don't come out washed out.
+     */
+    private function stripMetadata(UploadedFile $image): void
+    {
+        $imagick = new Imagick($image->getRealPath());
+        $colorProfile = $imagick->getImageProfiles('icc')['icc'] ?? null;
+
+        $imagick->autoOrient();
+        $imagick->stripImage();
+
+        if ($colorProfile !== null) {
+            $imagick->profileImage('icc', $colorProfile);
+        }
+
+        $imagick->writeImage($image->getRealPath());
+        $imagick->clear();
     }
 }

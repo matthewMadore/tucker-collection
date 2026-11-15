@@ -74,3 +74,18 @@ test('the piece page gives the card form the Stripe publishable key, and only th
 
     expect($response->getContent())->not->toContain('sk_test_secret');
 });
+
+test('in gallery-only mode, prices are hidden and the site says nothing is for sale', function () {
+    config(['shop.enabled' => false]);
+    $piece = ArtPiece::factory()->create(['status' => 'published', 'price_cents' => 4999]);
+
+    $this->get(route('home'))
+        ->assertInertia(fn ($page) => $page
+            ->where('shopEnabled', false)
+            ->where('artPieces.data.0.price_cents', null));
+
+    $response = $this->get(route('gallery.show', $piece))
+        ->assertInertia(fn ($page) => $page->where('artPiece.price_cents', null));
+
+    expect($response->getContent())->not->toContain('4999');
+});

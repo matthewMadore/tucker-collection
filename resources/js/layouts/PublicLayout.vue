@@ -27,6 +27,13 @@ import { dashboard, home, login } from '@/routes';
                 </Button>
             </div>
         </header>
+        <p
+            v-if="!$page.props.shopEnabled"
+            role="note"
+            class="bg-muted text-muted-foreground px-4 py-2 text-center text-sm"
+        >
+            Gallery preview: pieces aren't for sale yet.
+        </p>
         <main class="mx-auto w-full max-w-6xl flex-1">
             <slot />
         </main>

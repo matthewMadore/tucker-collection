@@ -22,7 +22,8 @@ class GalleryController extends Controller
             ->through(fn (ArtPiece $artPiece) => [
                 'id' => $artPiece->id,
                 'name' => $artPiece->name,
-                'price_cents' => $artPiece->price_cents,
+                // Gallery-only mode doesn't reveal prices.
+                'price_cents' => config('shop.enabled') ? $artPiece->price_cents : null,
                 'status' => $artPiece->status->value,
                 'status_label' => $artPiece->status->label(),
                 'cover_image_url' => $artPiece->images->first()?->url,
@@ -44,7 +45,7 @@ class GalleryController extends Controller
                 'id' => $artPiece->id,
                 'name' => $artPiece->name,
                 'description' => $artPiece->description,
-                'price_cents' => $artPiece->price_cents,
+                'price_cents' => config('shop.enabled') ? $artPiece->price_cents : null,
                 'status' => $artPiece->status->value,
                 'status_label' => $artPiece->status->label(),
                 'images' => $artPiece->images->map(fn (ArtPieceImage $image) => [

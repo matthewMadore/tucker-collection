@@ -10,7 +10,8 @@ defineProps<{
         id: number;
         name: string;
         description: string;
-        price_cents: number;
+        /** null in gallery-only mode */
+        price_cents: number | null;
         status: string;
         status_label: string;
         images: {
@@ -44,7 +45,7 @@ defineProps<{
                         {{ artPiece.status_label }}
                     </Badge>
                 </div>
-                <p class="text-lg">
+                <p v-if="artPiece.price_cents !== null" class="text-lg">
                     ${{ (artPiece.price_cents / 100).toFixed(2) }}
                 </p>
                 <p
@@ -54,14 +55,16 @@ defineProps<{
                     {{ artPiece.description }}
                 </p>
 
-                <BuyArtPiece
-                    v-if="artPiece.status === 'published'"
-                    :key="artPiece.id"
-                    :art-piece-id="artPiece.id"
-                    :price-cents="artPiece.price_cents"
-                    :stripe-key="stripeKey"
-                    :hold-minutes="holdMinutes"
-                />
+                <template v-if="artPiece.status === 'published'">
+                    <BuyArtPiece
+                        v-if="artPiece.price_cents !== null"
+                        :key="artPiece.id"
+                        :art-piece-id="artPiece.id"
+                        :price-cents="artPiece.price_cents"
+                        :stripe-key="stripeKey"
+                        :hold-minutes="holdMinutes"
+                    />
+                </template>
                 <p v-else class="text-muted-foreground text-sm">
                     {{
                         artPiece.status === 'sold'

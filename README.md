@@ -5,7 +5,7 @@ art — original cels, drawings, and production pieces, each one-of-a-kind.
 
 ## Stack
 
-Laravel 12, Vue 3 + Inertia, PostgreSQL, Laravel Sail (Docker)
+Laravel 13, Vue 3 + Inertia, PostgreSQL, Laravel Sail (Docker)
 
 ## Setup
 
@@ -25,6 +25,11 @@ Each step below is a real prerequisite for the next, not boilerplate ritual:
 
 Visit `http://localhost` for the public gallery and `http://localhost/login` to
 manage pieces. Mailpit (local email inbox) is at `http://localhost:8025`.
+
+**Selling is off by default** (`SHOP_ENABLED=false`): the site is a
+gallery with no prices or Buy button, and checkout is refused. Set
+`SHOP_ENABLED=true` to sell. Uploaded photos have their location (GPS)
+metadata stripped, which needs the PHP `imagick` extension on the server.
 
 Payments use a fake Stripe gateway until `STRIPE_SECRET` is set in `.env` (the
 card form also needs `STRIPE_KEY`), and

@@ -162,3 +162,41 @@ test('invalid art piece input is rejected with validation errors', function (arr
     'image over 10 MB' => [['images' => [UploadedFile::fake()->image('huge.jpg')->size(10 * 1024 + 1)]], 'images.0'],
     'more than 19 images' => [['images' => array_fill(0, 20, UploadedFile::fake()->image('a.jpg'))], 'images'],
 ]);
+
+/**
+ * A JPEG the way a phone saves it: EXIF with GPS coordinates and an
+ * orientation tag saying "rotate 90° to display". 40×20 pixels as stored.
+ */
+function phonePhotoWithGps(): string
+{
+    $canvas = imagecreatetruecolor(40, 20);
+    ob_start();
+    imagejpeg($canvas);
+    $jpeg = (string) ob_get_clean();
+
+    // TIFF (little-endian): IFD0 = Orientation 6 + pointer to the GPS IFD;
+    // GPS IFD = latitude ref "N" + latitude (3 rationals: 45° 31' 0").
+    $entry = fn (int $tag, int $type, int $count, string $value): string => pack('vvV', $tag, $type, $count).str_pad($value, 4, "\0");
+    $ifd0 = pack('v', 2).$entry(0x0112, 3, 1, pack('v', 6)).$entry(0x8825, 4, 1, pack('V', 38)).pack('V', 0);
+    $gps = pack('v', 2).$entry(0x0001, 2, 2, "N\0").$entry(0x0002, 5, 3, pack('V', 68)).pack('V', 0);
+    $tiff = 'II'.pack('vV', 42, 8).$ifd0.$gps.pack('V6', 45, 1, 31, 1, 0, 1);
+    $app1 = "\xFF\xE1".pack('n', strlen($tiff) + 8)."Exif\0\0".$tiff;
+
+    return substr($jpeg, 0, 2).$app1.substr($jpeg, 2);
+}
+
+test('uploaded photos lose their GPS location and other metadata, but keep their rotation', function () {
+    Storage::fake('public');
+    $this->actingAs(User::factory()->create());
+    $photo = UploadedFile::fake()->createWithContent('IMG_0001.jpg', phonePhotoWithGps());
+    expect(exif_read_data($photo->getRealPath()))->toHaveKey('GPSLatitude');
+
+    $this->post('/art-pieces', ['name' => 'Owl', 'price' => '10', 'images' => [$photo]])->assertSessionHasNoErrors();
+
+    $stored = Storage::disk('public')->path(ArtPiece::firstOrFail()->images()->value('path'));
+    $exif = @exif_read_data($stored) ?: [];
+    [$width, $height] = getimagesize($stored);
+    expect($exif)->not->toHaveKey('GPSLatitude')
+        ->and($exif)->not->toHaveKey('Orientation')
+        ->and([$width, $height])->toBe([20, 40]);
+});

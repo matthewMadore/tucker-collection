@@ -4,6 +4,11 @@ Guest checkout for a single piece, ported from the Fable version
 (`tucker-collection-fable-archive`) with fewer moving parts. Buyers don't
 need an account; the order stores their email.
 
+**Selling is switched off by default** (`SHOP_ENABLED=false`, see
+[public-gallery.md](public-gallery.md#behavior)): until it's turned on,
+checkout returns 404 and prices are hidden. Everything below describes
+the site with selling on.
+
 **Status (2026-11-14):** buyers can check out from a piece's public page:
 shipping form, server-quoted UPS shipping, total, Stripe card form,
 order page. Once paid, the buyer gets a confirmation email with a signed
@@ -90,7 +95,7 @@ dispute or dashboard-refund handling.
 ## Buying: the piece page
 
 What a buyer sees on a published piece's public page
-([gallery/Show.vue:57](../../resources/js/pages/gallery/Show.vue#L57)).
+([gallery/Show.vue:59](../../resources/js/pages/gallery/Show.vue#L59)).
 Held and sold pieces show "reserved by another buyer" / "sold" instead.
 
 | #   | Location                                                                           | What happens                                                                                                                                                                                                                                                                                                                                                                              |
@@ -98,7 +103,7 @@ Held and sold pieces show "reserved by another buyer" / "sold" instead.
 | 1   | [BuyArtPiece.vue](../../resources/js/components/BuyArtPiece.vue)                   | **Buy this piece · $price** opens a shipping form (US addresses only, for now). Fields carry `autocomplete`/`inputmode` hints, so iPhone autofill and the numeric keypad work.                                                                                                                                                                                                            |
 | 2   | [BuyArtPiece.vue:86](../../resources/js/components/BuyArtPiece.vue#L86)            | **Continue to payment** posts to checkout with Inertia's `useHttp`. Validation errors (422) appear under their fields. Any other failure, such as 409 "no longer available" or 429, is shown as a message, and the page reloads the piece's status ([line 90](../../resources/js/components/BuyArtPiece.vue#L90)), so a buyer who lost the race sees "reserved by another buyer".         |
 | 3   | Same component                                                                     | Shows piece + UPS shipping (service and days) = total, and "reserved for you for 20 minutes".                                                                                                                                                                                                                                                                                             |
-| 4   | [BuyArtPiece.vue:108](../../resources/js/components/BuyArtPiece.vue#L108)          | Loads Stripe.js with the **publishable** key (`STRIPE_KEY`, passed as a page prop by [GalleryController.php:55](../../app/Http/Controllers/GalleryController.php#L55); the secret key never reaches the browser) and mounts Stripe's Payment Element with the client secret. Without `STRIPE_KEY` it says card payments aren't set up, so the flow can be tried locally up to this point. |
+| 4   | [BuyArtPiece.vue:108](../../resources/js/components/BuyArtPiece.vue#L108)          | Loads Stripe.js with the **publishable** key (`STRIPE_KEY`, passed as a page prop by [GalleryController.php:56](../../app/Http/Controllers/GalleryController.php#L56); the secret key never reaches the browser) and mounts Stripe's Payment Element with the client secret. Without `STRIPE_KEY` it says card payments aren't set up, so the flow can be tried locally up to this point. |
 | 5   | [BuyArtPiece.vue:128](../../resources/js/components/BuyArtPiece.vue#L128)          | **Pay $total** calls `stripe.confirmPayment()`. A declined card shows Stripe's message and the buyer can try another card while the hold lasts. On success Stripe redirects to `/checkout/complete`.                                                                                                                                                                                      |
 | 6   | [CheckoutController.php:47](../../app/Http/Controllers/CheckoutController.php#L47) | Stripe's return link: looks the order up by the PaymentIntent id and redirects to the signed order page, which shows **our** order status ("Payment processing" until the webhook lands, then "Thank you!"). Stripe's `redirect_status` query parameter is ignored: only the webhook marks orders paid.                                                                                   |
 

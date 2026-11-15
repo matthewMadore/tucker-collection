@@ -38,6 +38,7 @@ class HandleInertiaRequests extends Middleware
         return [
             ...parent::share($request),
             'name' => config('app.name'),
+            'shopEnabled' => (bool) config('shop.enabled'),
             'auth' => [
                 'user' => $request->user(),
             ],

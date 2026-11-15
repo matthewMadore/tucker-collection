@@ -153,3 +153,13 @@ test('Stripe\'s return link redirects the buyer to their signed order page', fun
 test('Stripe\'s return link is not found for an unknown payment', function () {
     $this->get(route('checkout.complete', ['payment_intent' => 'pi_unknown']))->assertNotFound();
 });
+
+test('in gallery-only mode, checkout is refused and nothing is held', function () {
+    config(['shop.enabled' => false]);
+    $piece = ArtPiece::factory()->create(['status' => 'published']);
+
+    $this->postJson(route('checkout.store', $piece), $this->payload)->assertNotFound();
+
+    expect($piece->fresh()->status)->toBe(ArtPieceStatus::Published)
+        ->and(Order::count())->toBe(0);
+});

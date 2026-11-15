@@ -17,6 +17,8 @@ declare module '@inertiajs/core' {
     export interface InertiaConfig {
         sharedPageProps: {
             name: string;
+            /** Off: gallery only (no prices, no Buy button, no Sales menu). */
+            shopEnabled: boolean;
             auth: Auth;
             [key: string]: unknown;
         };

@@ -20,9 +20,14 @@ accounts are created from the command line.
   one is highlighted. Changing it flashes a toast ("Status changed to
   Published.") and, for non-drafts, shows a "View public page" link.
   Only moves the state machine allows are enabled (below).
+- **Gallery-only mode** (`SHOP_ENABLED=false`, the default): a banner
+  says "Gallery preview: pieces aren't for sale yet.", prices and the
+  Buy button are hidden (the server sends `price_cents: null`), checkout
+  returns 404, and the admin menu has no Sales item. Set
+  `SHOP_ENABLED=true` to sell.
 - **Public gallery:** published, held and sold pieces, newest first,
   24 per page. Each card shows the first image (by `position`), name and
-  price. Held and sold pieces carry an "On hold" / "Sold" badge, so the
+  price (when selling is on). Held and sold pieces carry an "On hold" / "Sold" badge, so the
   gallery shows the full body of work.
 - **Public piece page:** all images with a thumbnail strip, price and
   description. A draft returns 404, the same as a missing piece, so its
@@ -38,10 +43,10 @@ accounts are created from the command line.
 
 | Method | Path                            | Name                       | Access            | Handler                                                                                   |
 | ------ | ------------------------------- | -------------------------- | ----------------- | ----------------------------------------------------------------------------------------- |
-| GET    | `/`                             | `home`                     | public            | [GalleryController::index](../../app/Http/Controllers/GalleryController.php#L15)          |
-| GET    | `/art/{artPiece}`               | `gallery.show`             | public, non-draft | [GalleryController::show](../../app/Http/Controllers/GalleryController.php#L35)           |
-| GET    | `/art-pieces/{artPiece}`        | `art-pieces.show`          | auth + verified   | [ArtPieceController::show](../../app/Http/Controllers/ArtPieceController.php#L40)         |
-| PATCH  | `/art-pieces/{artPiece}/status` | `art-pieces.status.update` | auth + verified   | [ArtPieceController::updateStatus](../../app/Http/Controllers/ArtPieceController.php#L63) |
+| GET    | `/`                             | `home`                     | public            | [GalleryController::index](../../app/Http/Controllers/GalleryController.php#L16)          |
+| GET    | `/art/{artPiece}`               | `gallery.show`             | public, non-draft | [GalleryController::show](../../app/Http/Controllers/GalleryController.php#L37)           |
+| GET    | `/art-pieces/{artPiece}`        | `art-pieces.show`          | auth + verified   | [ArtPieceController::show](../../app/Http/Controllers/ArtPieceController.php#L41)         |
+| PATCH  | `/art-pieces/{artPiece}/status` | `art-pieces.status.update` | auth + verified   | [ArtPieceController::updateStatus](../../app/Http/Controllers/ArtPieceController.php#L64) |
 
 Defined in [routes/web.php](../../routes/web.php#L11).
 
@@ -52,7 +57,7 @@ Defined in [routes/web.php](../../routes/web.php#L11).
 | 1   | [art-pieces/Show.vue:45](../../resources/js/pages/art-pieces/Show.vue#L45)                 | `changeStatus()` sends `PATCH /art-pieces/{id}/status` with `{ status }` via `useForm`.                                                        |
 | 2   | [routes/web.php:24](../../routes/web.php#L24)                                              | Inside the `auth` + `verified` group: guests are redirected to login.                                                                          |
 | 3   | [UpdateArtPieceStatusRequest.php](../../app/Http/Requests/UpdateArtPieceStatusRequest.php) | `Rule::enum(ArtPieceStatus::class)`: anything else fails with "The selected status is invalid." A piece with an open order is refused (below). |
-| 4   | [ArtPieceController.php:63](../../app/Http/Controllers/ArtPieceController.php#L63)         | Saves the status, flashes the toast, redirects back. Inertia reloads the page props.                                                           |
+| 4   | [ArtPieceController.php:64](../../app/Http/Controllers/ArtPieceController.php#L64)         | Saves the status, flashes the toast, redirects back. Inertia reloads the page props.                                                           |
 | 5   | Postgres                                                                                   | The `status_valid` CHECK constraint rejects unknown values even if application validation is bypassed.                                         |
 
 ## Call chain: a visitor opens the gallery
@@ -60,7 +65,7 @@ Defined in [routes/web.php](../../routes/web.php#L11).
 | #   | Location                                                                         | Responsibility                                                                                             |
 | --- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
 | 1   | [routes/web.php:11](../../routes/web.php#L11)                                    | Public route, no middleware beyond `web`.                                                                  |
-| 2   | [GalleryController.php:15](../../app/Http/Controllers/GalleryController.php#L15) | `ArtPiece::visibleToPublic()`, images eager-loaded in `position` order, paginated.                         |
+| 2   | [GalleryController.php:16](../../app/Http/Controllers/GalleryController.php#L16) | `ArtPiece::visibleToPublic()`, images eager-loaded in `position` order, paginated.                         |
 | 3   | [ArtPiece.php:70](../../app/Models/ArtPiece.php#L70)                             | The `visibleToPublic` scope: `WHERE status IN ('published', 'held', 'sold')`.                              |
 | 4   | [gallery/Index.vue](../../resources/js/pages/gallery/Index.vue)                  | Renders inside [PublicLayout.vue](../../resources/js/layouts/PublicLayout.vue) (logo, Log in / Dashboard). |
 
@@ -136,11 +141,11 @@ Defined in [routes/web.php](../../routes/web.php#L11).
 
 1. **Real-device check.** Add to Home Screen and a HEIC upload from an
    iPhone, once deployed.
-2. **Branding.** `APP_NAME` is still "Laravel" and the header logo is
-   Laravel's (`AppLogoIcon.vue`); the "TC" icon is a placeholder.
-3. **Location metadata.** Published images are now public, so stripping
-   GPS EXIF data ([image-upload.md](image-upload.md#open-items), item 6)
-   should land before launch.
+2. **Branding.** Named "The Tucker Collection" with a "TC" serif
+   monogram (`AppLogoIcon.vue`, `public/icon.svg`); a designed logo can
+   replace it later.
+3. **Location metadata.** Stripped on upload
+   ([image-upload.md](image-upload.md#behavior)).
 4. **Editing and deleting pieces.** Not built; only status can change
    after creation.
 5. **Admin page layout on phones.** Pieces with many images push the

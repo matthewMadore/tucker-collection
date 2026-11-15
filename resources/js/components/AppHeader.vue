@@ -65,11 +65,10 @@ const mainNavItems: NavItem[] = [
         href: dashboard(),
         icon: LayoutGrid,
     },
-    {
-        title: 'Sales',
-        href: sales(),
-        icon: Receipt,
-    },
+    // Sales only exists while selling is on.
+    ...(page.props.shopEnabled
+        ? [{ title: 'Sales', href: sales(), icon: Receipt }]
+        : []),
     {
         title: 'Gallery',
         href: home(),
