@@ -3,7 +3,9 @@
 namespace App\Providers;
 
 use App\Contracts\PaymentGateway;
+use App\Contracts\ShippingRateProvider;
 use App\Gateways\FakeStripePaymentGateway;
+use App\Gateways\FakeUpsShippingRateProvider;
 use App\Gateways\StripePaymentGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
@@ -27,6 +29,8 @@ class AppServiceProvider extends ServiceProvider
         $this->app->bind(PaymentGateway::class, fn (): PaymentGateway => filled(config('services.stripe.secret'))
             ? new StripePaymentGateway(new StripeClient((string) config('services.stripe.secret')))
             : new FakeStripePaymentGateway);
+
+        $this->app->bind(ShippingRateProvider::class, FakeUpsShippingRateProvider::class);
     }
 
     /**

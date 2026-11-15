@@ -4,29 +4,31 @@ Guest checkout for a single piece, ported from the Fable version
 (`tucker-collection-fable-archive`) with fewer moving parts. Buyers don't
 need an account; the order stores their email.
 
-**Status (2026-11-14):** checkout, the payment webhook and hold expiry
-work end to end on the fake gateway (verified in the running app). The
-real Stripe gateway is in place and used whenever `STRIPE_SECRET` is set;
-it's tested against a recorded Stripe HTTP layer but not yet against a
-live Stripe test account. Not built yet: UPS shipping rates, the card
-form, emails, and admin orders. See [Roadmap](#roadmap).
+**Status (2026-11-14):** checkout (with server-quoted shipping), the
+payment webhook and hold expiry work end to end on the fake gateways
+(verified in the running app). The real Stripe gateway is in place and
+used whenever `STRIPE_SECRET` is set; it's tested against a recorded
+Stripe HTTP layer but not yet a live Stripe test account. Shipping rates
+come from a fake UPS provider. Not built yet: the real UPS Rating API, the
+card form, emails, and admin orders. See [Roadmap](#roadmap).
 
 ## Checkout call chain
 
 `POST /art/{artPiece}/checkout` with `email` and `shipping_address`. No
 login; rate-limited. Returns JSON for the card form (not a page visit).
 
-| #   | Location                                                                           | Responsibility                                                                                                                                                                 |
-| --- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:40](../../app/Providers/AppServiceProvider.php#L40)), against card-testing bots. |
-| 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                           |
-| 3   | [CheckoutController.php:19](../../app/Http/Controllers/CheckoutController.php#L19) | Drafts return 404, as on the public piece page.                                                                                                                                |
-| 4   | [CheckoutService.php:35](../../app/Services/CheckoutService.php#L35)               | One transaction for steps 5–8: any failure rolls everything back and the piece stays published.                                                                                |
-| 5   | [CheckoutService.php:39](../../app/Services/CheckoutService.php#L39)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."    |
-| 6   | [CheckoutService.php:53](../../app/Services/CheckoutService.php#L53)               | Pending order with prices read from the piece row, plus an order item snapshotting name and price.                                                                             |
-| 7   | [CheckoutService.php:68](../../app/Services/CheckoutService.php#L68)               | `PaymentGateway::createIntent($order)`: the amount comes from the order.                                                                                                       |
-| 8   | [CheckoutService.php:70](../../app/Services/CheckoutService.php#L70)               | Pending payment row with the gateway's intent id.                                                                                                                              |
-| 9   | Response                                                                           | `201 { order_id, total_cents, currency, client_secret }`. The client secret goes to the browser's card form and is never stored.                                               |
+| #   | Location                                                                           | Responsibility                                                                                                                                                                                                                                                               |
+| --- | ---------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:44](../../app/Providers/AppServiceProvider.php#L44)), against card-testing bots.                                                                                               |
+| 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                                                                                                                         |
+| 3   | [CheckoutController.php:19](../../app/Http/Controllers/CheckoutController.php#L19) | Drafts return 404, as on the public piece page.                                                                                                                                                                                                                              |
+| 4   | [CheckoutService.php:40](../../app/Services/CheckoutService.php#L40)               | One transaction for steps 5–9: any failure rolls everything back and the piece stays published.                                                                                                                                                                              |
+| 5   | [CheckoutService.php:44](../../app/Services/CheckoutService.php#L44)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."                                                                                                  |
+| 6   | [CheckoutService.php:59](../../app/Services/CheckoutService.php#L59)               | **Shipping quote** from the `ShippingRateProvider` (UPS) for this piece and address, on the server.                                                                                                                                                                          |
+| 7   | [CheckoutService.php:61](../../app/Services/CheckoutService.php#L61)               | Pending order: subtotal from the piece row, shipping from the quote, total = both. Plus an order item snapshotting name and price, and a pending shipment recording carrier, service level and quoted rate ([line 76](../../app/Services/CheckoutService.php#L76)).          |
+| 8   | [CheckoutService.php:82](../../app/Services/CheckoutService.php#L82)               | `PaymentGateway::createIntent($order)`: the amount is the order total.                                                                                                                                                                                                       |
+| 9   | [CheckoutService.php:84](../../app/Services/CheckoutService.php#L84)               | Pending payment row with the gateway's intent id.                                                                                                                                                                                                                            |
+| 10  | Response                                                                           | `201 { order_id, subtotal_cents, shipping_cents, total_cents, currency, shipping: { carrier, service_level, estimated_days }, client_secret }`. The card form shows the shipping and total before the buyer pays. The client secret goes to the browser and is never stored. |
 
 ## Webhook call chain: payment succeeded
 
@@ -74,9 +76,9 @@ If the buyer doesn't pay in time, the piece goes back on sale.
 | --- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | 1   | [routes/console.php:5](../../routes/console.php#L5)                                  | Laravel's scheduler runs `app:release-expired-holds` every minute (no overlapping runs).                                                                                                                                   |
 | 2   | [ReleaseExpiredHolds.php:25](../../app/Console/Commands/ReleaseExpiredHolds.php#L25) | Finds pending orders with a live item whose piece is `held` with `held_until` in the past. Manual holds have no `held_until`, so they never expire.                                                                        |
-| 3   | [CheckoutService.php:91](../../app/Services/CheckoutService.php#L91)                 | **Cancel the payment at Stripe first**, so the buyer can't pay for a piece that's back on sale. If Stripe refuses (the payment already went through), it throws and nothing changes; the webhook will mark the order paid. |
-| 4   | [CheckoutService.php:96](../../app/Services/CheckoutService.php#L96)                 | Lock the order row so a webhook can't interleave; skip it if it's no longer pending.                                                                                                                                       |
-| 5   | [CheckoutService.php:102](../../app/Services/CheckoutService.php#L102)               | Order → cancelled, payment → failed, item voided, piece → published (`held_until` cleared).                                                                                                                                |
+| 3   | [CheckoutService.php:105](../../app/Services/CheckoutService.php#L105)               | **Cancel the payment at Stripe first**, so the buyer can't pay for a piece that's back on sale. If Stripe refuses (the payment already went through), it throws and nothing changes; the webhook will mark the order paid. |
+| 4   | [CheckoutService.php:110](../../app/Services/CheckoutService.php#L110)               | Lock the order row so a webhook can't interleave; skip it if it's no longer pending.                                                                                                                                       |
+| 5   | [CheckoutService.php:116](../../app/Services/CheckoutService.php#L116)               | Order → cancelled, payment → failed, item voided, piece → published (`held_until` cleared).                                                                                                                                |
 | 6   | [ReleaseExpiredHolds.php:36](../../app/Console/Commands/ReleaseExpiredHolds.php#L36) | A failure on one order is reported and the rest are still released.                                                                                                                                                        |
 
 **The scheduler must be running** for holds to expire: locally
@@ -122,11 +124,29 @@ so no Stripe SDK type leaks into the app.
 
 | Gateway                                                                     | Used when                                                                                            | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
 | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [StripePaymentGateway](../../app/Gateways/StripePaymentGateway.php)         | `STRIPE_SECRET` is set ([AppServiceProvider.php:27](../../app/Providers/AppServiceProvider.php#L27)) | Creates a PaymentIntent for the order total with `order_id` metadata and `receipt_email` (Stripe emails the buyer a receipt). Sends an idempotency key per order ([line 30](../../app/Gateways/StripePaymentGateway.php#L30)), so a retried request can't create a second payment. `cancelIntent()` treats "already cancelled" as success and throws on anything else, such as "already succeeded" ([line 43](../../app/Gateways/StripePaymentGateway.php#L43)), which keeps the hold. |
+| [StripePaymentGateway](../../app/Gateways/StripePaymentGateway.php)         | `STRIPE_SECRET` is set ([AppServiceProvider.php:29](../../app/Providers/AppServiceProvider.php#L29)) | Creates a PaymentIntent for the order total with `order_id` metadata and `receipt_email` (Stripe emails the buyer a receipt). Sends an idempotency key per order ([line 30](../../app/Gateways/StripePaymentGateway.php#L30)), so a retried request can't create a second payment. `cancelIntent()` treats "already cancelled" as success and throws on anything else, such as "already succeeded" ([line 43](../../app/Gateways/StripePaymentGateway.php#L43)), which keeps the hold. |
 | [FakeStripePaymentGateway](../../app/Gateways/FakeStripePaymentGateway.php) | `STRIPE_SECRET` is empty                                                                             | Returns fake ids; cancelling does nothing. Local development works without a Stripe account.                                                                                                                                                                                                                                                                                                                                                                                           |
 
 `phpunit.xml` forces `STRIPE_SECRET` to empty, so the test suite never
 calls Stripe, even when `.env` has real keys.
+
+## Shipping rates
+
+[ShippingRateProvider](../../app/Contracts/ShippingRateProvider.php) is the
+seam to the carrier, like `PaymentGateway` is to Stripe. Checkout asks it
+for a quote on the server, so the shipping cost (like the price) can't be
+set by the browser. It receives the whole art piece, not just its price,
+because real carrier rates need the package's size and weight.
+
+[FakeUpsShippingRateProvider](../../app/Gateways/FakeUpsShippingRateProvider.php)
+is bound in `AppServiceProvider` until UPS credentials exist: $45 UPS
+Ground (signature required) plus $5 of declared-value insurance per full
+$1,000 of the piece's price, 5 days. The real UPS Rating API comes next.
+
+**Difference from Fable:** Fable had a shipping-quote endpoint but its
+checkout always set `shipping_cents = 0`, so shipping was never charged.
+Here the quote is part of checkout and included in the payment amount;
+there is no separate quote endpoint.
 
 ## Running locally with Stripe test mode
 
@@ -150,6 +170,11 @@ In production, the webhook signing secret comes from the endpoint added
 in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Tests
+
+- [CheckoutTest.php](../../tests/Feature/CheckoutTest.php) also covers
+  shipping: the total is price + quoted shipping, a pending shipment
+  records the quote, a request can't set the shipping cost, and the fake
+  UPS insurance rule ($5 per full $1,000).
 
 - [StripePaymentGatewayTest.php](../../tests/Feature/StripePaymentGatewayTest.php):
   runs the real Stripe SDK over a recording HTTP client. Creating a
@@ -189,10 +214,10 @@ in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Roadmap
 
-| Commit | Adds                                                                                 |
-| ------ | ------------------------------------------------------------------------------------ |
-| 7–8    | UPS shipping rates (fake, then the real UPS Rating API); shipping added to the total |
-| 9      | Buy button and card form (`@stripe/stripe-js`)                                       |
-| 10     | Order emails and a signed "view your order" link                                     |
-| 11     | Admin orders: mark shipped, refund (calls Stripe, unlike Fable's)                    |
-| 12     | Disputes and dashboard refunds via webhooks                                          |
+| Commit | Adds                                                                                                    |
+| ------ | ------------------------------------------------------------------------------------------------------- |
+| 8      | Real UPS Rating API behind `ShippingRateProvider` (needs UPS developer credentials), flat-rate fallback |
+| 9      | Buy button and card form (`@stripe/stripe-js`)                                                          |
+| 10     | Order emails and a signed "view your order" link                                                        |
+| 11     | Admin orders: mark shipped, refund (calls Stripe, unlike Fable's)                                       |
+| 12     | Disputes and dashboard refunds via webhooks                                                             |

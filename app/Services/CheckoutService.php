@@ -3,10 +3,12 @@
 namespace App\Services;
 
 use App\Contracts\PaymentGateway;
+use App\Contracts\ShippingRateProvider;
 use App\Enums\ArtPieceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Exceptions\PieceUnavailableException;
+use App\Gateways\ShippingQuote;
 use App\Models\ArtPiece;
 use App\Models\Order;
 use Illuminate\Support\Facades\DB;
@@ -18,7 +20,10 @@ class CheckoutService
      */
     public const int HOLD_MINUTES = 20;
 
-    public function __construct(private readonly PaymentGateway $gateway) {}
+    public function __construct(
+        private readonly PaymentGateway $gateway,
+        private readonly ShippingRateProvider $shipping,
+    ) {}
 
     /**
      * Hold the piece, create a pending order and payment, and start the
@@ -26,7 +31,7 @@ class CheckoutService
      * transaction rolls back and the piece stays published.
      *
      * @param  array<string, string>  $shippingAddress
-     * @return array{order: Order, clientSecret: string}
+     * @return array{order: Order, clientSecret: string, shipping: ShippingQuote}
      *
      * @throws PieceUnavailableException when another buyer got there first
      */
@@ -49,12 +54,15 @@ class CheckoutService
 
             $piece->refresh();
 
-            // Prices come from the database row, never from the request.
+            // Prices come from the database row and the carrier, never from
+            // the request.
+            $shipping = $this->shipping->quote($piece, $shippingAddress);
+
             $order = Order::create([
                 'buyer_email' => $buyerEmail,
                 'subtotal_cents' => $piece->price_cents,
-                'shipping_cents' => 0,
-                'total_cents' => $piece->price_cents,
+                'shipping_cents' => $shipping->rateCents,
+                'total_cents' => $piece->price_cents + $shipping->rateCents,
                 'currency' => $piece->currency,
                 'shipping_address' => $shippingAddress,
             ]);
@@ -65,6 +73,12 @@ class CheckoutService
                 'price_cents_snapshot' => $piece->price_cents,
             ]);
 
+            $order->shipment()->create([
+                'carrier' => $shipping->carrier,
+                'service_level' => $shipping->serviceLevel,
+                'quoted_rate_cents' => $shipping->rateCents,
+            ]);
+
             $intent = $this->gateway->createIntent($order);
 
             $order->payment()->create([
@@ -73,7 +87,7 @@ class CheckoutService
                 'currency' => $order->currency,
             ]);
 
-            return ['order' => $order, 'clientSecret' => $intent->clientSecret];
+            return ['order' => $order, 'clientSecret' => $intent->clientSecret, 'shipping' => $shipping];
         });
     }
 

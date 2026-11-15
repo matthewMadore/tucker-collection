@@ -104,6 +104,9 @@ Ported from the Fable version, with `user_id` replaced by `buyer_email`.
 - **Statuses are valid.** Each status column has a CHECK constraint that
   mirrors its PHP enum; the enums also define which status changes are
   allowed (see [public-gallery.md](public-gallery.md#key-decisions)).
+- **Shipping is quoted at checkout.** Checkout writes a pending `shipments`
+  row with the carrier, service level and quoted rate; the order's
+  `shipping_cents` and `total_cents` include that rate.
 - **History is kept.** Foreign keys from order data are `RESTRICT`, so a
   piece or order with sales history can't be deleted out from under it,
   and items keep a snapshot of the name and price paid.
