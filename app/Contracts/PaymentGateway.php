@@ -16,4 +16,11 @@ interface PaymentGateway
      * the order (read from the database), never from the browser.
      */
     public function createIntent(Order $order): PaymentIntent;
+
+    /**
+     * Stop the payment from being completed (e.g. its hold expired).
+     * Throws if it can't be cancelled, for example because it already
+     * succeeded.
+     */
+    public function cancelIntent(string $intentId): void;
 }

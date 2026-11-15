@@ -4,10 +4,11 @@ Guest checkout for a single piece, ported from the Fable version
 (`tucker-collection-fable-archive`) with fewer moving parts. Buyers don't
 need an account; the order stores their email.
 
-**Status (2026-11-14):** checkout and the payment webhook work end to end
-on the fake gateway (verified over real HTTP: checkout → signed webhook →
-order paid, piece sold). Not built yet: hold expiry, the real Stripe
-gateway, UPS shipping rates, the card form, emails, and admin orders. See
+**Status (2026-11-14):** checkout, the payment webhook and hold expiry
+work end to end on the fake gateway (verified in the running app:
+checkout → signed webhook → paid and sold; checkout → hold expires →
+cancelled and back on sale). Not built yet: the real Stripe gateway, UPS
+shipping rates, the card form, emails, and admin orders. See
 [Roadmap](#roadmap).
 
 ## Checkout call chain
@@ -20,11 +21,11 @@ login; rate-limited. Returns JSON for the card form (not a page visit).
 | 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:34](../../app/Providers/AppServiceProvider.php#L34)), against card-testing bots. |
 | 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                           |
 | 3   | [CheckoutController.php:19](../../app/Http/Controllers/CheckoutController.php#L19) | Drafts return 404, as on the public piece page.                                                                                                                                |
-| 4   | [CheckoutService.php:33](../../app/Services/CheckoutService.php#L33)               | One transaction for steps 5–8: any failure rolls everything back and the piece stays published.                                                                                |
-| 5   | [CheckoutService.php:37](../../app/Services/CheckoutService.php#L37)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."    |
-| 6   | [CheckoutService.php:51](../../app/Services/CheckoutService.php#L51)               | Pending order with prices read from the piece row, plus an order item snapshotting name and price.                                                                             |
-| 7   | [CheckoutService.php:66](../../app/Services/CheckoutService.php#L66)               | `PaymentGateway::createIntent($order)`: the amount comes from the order.                                                                                                       |
-| 8   | [CheckoutService.php:68](../../app/Services/CheckoutService.php#L68)               | Pending payment row with the gateway's intent id.                                                                                                                              |
+| 4   | [CheckoutService.php:35](../../app/Services/CheckoutService.php#L35)               | One transaction for steps 5–8: any failure rolls everything back and the piece stays published.                                                                                |
+| 5   | [CheckoutService.php:39](../../app/Services/CheckoutService.php#L39)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."    |
+| 6   | [CheckoutService.php:53](../../app/Services/CheckoutService.php#L53)               | Pending order with prices read from the piece row, plus an order item snapshotting name and price.                                                                             |
+| 7   | [CheckoutService.php:68](../../app/Services/CheckoutService.php#L68)               | `PaymentGateway::createIntent($order)`: the amount comes from the order.                                                                                                       |
+| 8   | [CheckoutService.php:70](../../app/Services/CheckoutService.php#L70)               | Pending payment row with the gateway's intent id.                                                                                                                              |
 | 9   | Response                                                                           | `201 { order_id, total_cents, currency, client_secret }`. The client secret goes to the browser's card form and is never stored.                                               |
 
 ## Webhook call chain: payment succeeded
@@ -33,16 +34,17 @@ Stripe calls `POST /stripe/webhook` when a payment completes. The webhook,
 not the buyer's browser, decides whether an order is paid: it's signed,
 retried by Stripe, and arrives even if the buyer closes the tab.
 
-| #   | Location                                                                                           | Responsibility                                                                                              |
-| --- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:14](../../routes/web.php#L14), [bootstrap/app.php:21](../../bootstrap/app.php#L21) | Public route, excluded from CSRF (Stripe can't send a token; the signature replaces it).                    |
-| 2   | [StripeWebhookController.php:21](../../app/Http/Controllers/StripeWebhookController.php#L21)       | No `STRIPE_WEBHOOK_SECRET` → 500 and log. An empty secret would let anyone sign a fake event.               |
-| 3   | [StripeWebhookController.php:28](../../app/Http/Controllers/StripeWebhookController.php#L28)       | `Stripe\Webhook::constructEvent()` checks the HMAC signature and rejects events older than 5 minutes → 400. |
-| 4   | [StripeWebhookHandler.php:29](../../app/Services/StripeWebhookHandler.php#L29)                     | One transaction for steps 5–8.                                                                              |
-| 5   | [StripeWebhookHandler.php:30](../../app/Services/StripeWebhookHandler.php#L30)                     | Record the event id in `stripe_events_processed`; already there → skip (Stripe delivers at least once).     |
-| 6   | [StripeWebhookHandler.php:63](../../app/Services/StripeWebhookHandler.php#L63)                     | Payment already succeeded (same outcome under a new event id) → skip; statuses never move backwards.        |
-| 7   | [StripeWebhookHandler.php:72](../../app/Services/StripeWebhookHandler.php#L72)                     | Amount or currency differs from the payment → log an error and leave the order unpaid for review.           |
-| 8   | [StripeWebhookHandler.php:89](../../app/Services/StripeWebhookHandler.php#L89)                     | Payment → processing → succeeded, order → paid (`placed_at`), piece → sold (`held_until` cleared).          |
+| #   | Location                                                                                           | Responsibility                                                                                                                                                               |
+| --- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [routes/web.php:14](../../routes/web.php#L14), [bootstrap/app.php:21](../../bootstrap/app.php#L21) | Public route, excluded from CSRF (Stripe can't send a token; the signature replaces it).                                                                                     |
+| 2   | [StripeWebhookController.php:21](../../app/Http/Controllers/StripeWebhookController.php#L21)       | No `STRIPE_WEBHOOK_SECRET` → 500 and log. An empty secret would let anyone sign a fake event.                                                                                |
+| 3   | [StripeWebhookController.php:28](../../app/Http/Controllers/StripeWebhookController.php#L28)       | `Stripe\Webhook::constructEvent()` checks the HMAC signature and rejects events older than 5 minutes → 400.                                                                  |
+| 4   | [StripeWebhookHandler.php:30](../../app/Services/StripeWebhookHandler.php#L30)                     | One transaction for steps 5–9.                                                                                                                                               |
+| 5   | [StripeWebhookHandler.php:31](../../app/Services/StripeWebhookHandler.php#L31)                     | Record the event id in `stripe_events_processed`; already there → skip (Stripe delivers at least once).                                                                      |
+| 6   | [StripeWebhookHandler.php:64](../../app/Services/StripeWebhookHandler.php#L64)                     | Payment already succeeded (same outcome under a new event id) → skip; statuses never move backwards.                                                                         |
+| 7   | [StripeWebhookHandler.php:69](../../app/Services/StripeWebhookHandler.php#L69)                     | Lock the order row. If it's no longer pending (its hold expired and it was cancelled), log **critical: refund it** and stop, instead of selling a piece that's back on sale. |
+| 8   | [StripeWebhookHandler.php:91](../../app/Services/StripeWebhookHandler.php#L91)                     | Amount or currency differs from the payment → log an error and leave the order unpaid for review.                                                                            |
+| 9   | [StripeWebhookHandler.php:108](../../app/Services/StripeWebhookHandler.php#L108)                   | Payment → processing → succeeded, order → paid (`placed_at`), piece → sold (`held_until` cleared).                                                                           |
 
 Unknown payment intents and event types the app doesn't handle are
 acknowledged (200) so Stripe stops retrying; unknown intents are logged.
@@ -62,20 +64,53 @@ acknowledged (200) so Stripe stops retrying; unknown intents are logged.
   Fable's hand-written one, and no simulated webhook job: locally, the
   real Stripe test mode and `stripe listen` replace it.
 
+## Hold expiry
+
+A checkout holds the piece for 20 minutes
+([`CheckoutService::HOLD_MINUTES`](../../app/Services/CheckoutService.php)).
+If the buyer doesn't pay in time, the piece goes back on sale.
+
+| #   | Location                                                                             | Responsibility                                                                                                                                                                                                             |
+| --- | ------------------------------------------------------------------------------------ | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [routes/console.php:5](../../routes/console.php#L5)                                  | Laravel's scheduler runs `app:release-expired-holds` every minute (no overlapping runs).                                                                                                                                   |
+| 2   | [ReleaseExpiredHolds.php:25](../../app/Console/Commands/ReleaseExpiredHolds.php#L25) | Finds pending orders with a live item whose piece is `held` with `held_until` in the past. Manual holds have no `held_until`, so they never expire.                                                                        |
+| 3   | [CheckoutService.php:91](../../app/Services/CheckoutService.php#L91)                 | **Cancel the payment at Stripe first**, so the buyer can't pay for a piece that's back on sale. If Stripe refuses (the payment already went through), it throws and nothing changes; the webhook will mark the order paid. |
+| 4   | [CheckoutService.php:96](../../app/Services/CheckoutService.php#L96)                 | Lock the order row so a webhook can't interleave; skip it if it's no longer pending.                                                                                                                                       |
+| 5   | [CheckoutService.php:102](../../app/Services/CheckoutService.php#L102)               | Order → cancelled, payment → failed, item voided, piece → published (`held_until` cleared).                                                                                                                                |
+| 6   | [ReleaseExpiredHolds.php:36](../../app/Console/Commands/ReleaseExpiredHolds.php#L36) | A failure on one order is reported and the rest are still released.                                                                                                                                                        |
+
+**The scheduler must be running** for holds to expire: locally
+`./vendor/bin/sail artisan schedule:work`; in production, the host's
+scheduler (one cron entry or the platform's scheduler setting).
+
+**Differences from Fable:** Fable released the piece but never cancelled
+the Stripe payment (the buyer could still pay for a piece back on sale),
+left the payment `pending`, and had no locking between expiry and the
+webhook.
+
+**Declined cards don't release the hold.** Stripe sends
+`payment_intent.payment_failed` when a card is declined, but the buyer can
+retry with another card on the same payment. Releasing on the first
+decline would let someone else take the piece while they retype it, so the
+hold stays until it expires. Card-testing bots are limited by the
+checkout rate limit instead.
+
 ## Fraud and correctness controls
 
-| Control                                       | Where                                                                    | Proven by                                      |
-| --------------------------------------------- | ------------------------------------------------------------------------ | ---------------------------------------------- |
-| A piece can't be sold twice                   | Conditional UPDATE (the hold) + partial unique index on live order items | `ConcurrentCheckoutTest`, `CheckoutSchemaTest` |
-| Price can't be tampered with                  | Request has no amount; service reads the piece row                       | `CheckoutTest`                                 |
-| Card-testing bots are slowed down             | `throttle:checkout`, 10/min per IP                                       | `CheckoutTest`                                 |
-| Partial failures leave no half-made order     | Single DB transaction around hold, order, and gateway call               | `CheckoutTest` (gateway throws)                |
-| Drafts aren't discoverable                    | 404 for non-public pieces                                                | `CheckoutTest`                                 |
-| Forged "payment succeeded" calls are rejected | SDK signature check; webhook refused if no secret is configured          | `StripeWebhookTest`                            |
-| Captured webhooks can't be replayed later     | Signature timestamp older than 5 minutes is rejected                     | `StripeWebhookTest`                            |
-| Each Stripe event is applied once             | `stripe_events_processed` ledger, in the same transaction as the changes | `StripeWebhookTest`                            |
-| Paid amount must match the order              | Amount + currency check before marking paid                              | `StripeWebhookTest`                            |
-| Illegal status changes are impossible         | Enum state machines + `transitionTo()`, CHECK constraints                | `StatusTransitionsTest`, `CheckoutSchemaTest`  |
+| Control                                       | Where                                                                                                 | Proven by                                      |
+| --------------------------------------------- | ----------------------------------------------------------------------------------------------------- | ---------------------------------------------- |
+| A piece can't be sold twice                   | Conditional UPDATE (the hold) + partial unique index on live order items                              | `ConcurrentCheckoutTest`, `CheckoutSchemaTest` |
+| Price can't be tampered with                  | Request has no amount; service reads the piece row                                                    | `CheckoutTest`                                 |
+| Card-testing bots are slowed down             | `throttle:checkout`, 10/min per IP                                                                    | `CheckoutTest`                                 |
+| Partial failures leave no half-made order     | Single DB transaction around hold, order, and gateway call                                            | `CheckoutTest` (gateway throws)                |
+| Drafts aren't discoverable                    | 404 for non-public pieces                                                                             | `CheckoutTest`                                 |
+| Forged "payment succeeded" calls are rejected | SDK signature check; webhook refused if no secret is configured                                       | `StripeWebhookTest`                            |
+| Captured webhooks can't be replayed later     | Signature timestamp older than 5 minutes is rejected                                                  | `StripeWebhookTest`                            |
+| Each Stripe event is applied once             | `stripe_events_processed` ledger, in the same transaction as the changes                              | `StripeWebhookTest`                            |
+| Paid amount must match the order              | Amount + currency check before marking paid                                                           | `StripeWebhookTest`                            |
+| Unpaid holds don't block a piece forever      | Scheduled expiry after 20 minutes                                                                     | `HoldExpiryTest`                               |
+| No payment for a piece that's back on sale    | Expiry cancels the Stripe payment before releasing; order row locks; late payments flagged for refund | `HoldExpiryTest`, `StripeWebhookTest`          |
+| Illegal status changes are impossible         | Enum state machines + `transitionTo()`, CHECK constraints                                             | `StatusTransitionsTest`, `CheckoutSchemaTest`  |
 
 ## The payment gateway seam
 
@@ -89,13 +124,20 @@ Stripe gateway replaces it when keys are configured.
 
 ## Tests
 
+- [HoldExpiryTest.php](../../tests/Feature/HoldExpiryTest.php): an
+  expired hold cancels the payment at Stripe, cancels the order, fails the
+  payment, voids the item and republishes the piece; unexpired and manual
+  holds are left alone; if Stripe refuses to cancel, that hold is kept and
+  the others are still released; the command is scheduled every minute.
+
 - [StripeWebhookTest.php](../../tests/Feature/StripeWebhookTest.php):
   success marks payment/order/piece; wrong-secret, unsigned and
   5-minute-old signatures → 400; no configured secret → 500; a redelivered
   event applies once; a second success event can't change a paid order;
   amount or currency mismatch is flagged, not paid; unknown intents and
   event types are acknowledged; a failed attempt records nothing and the
-  retry succeeds. Each protection was removed in turn to confirm its test
+  retry succeeds; a payment landing after its order was cancelled is
+  flagged for a refund, not sold. Each protection was removed in turn to confirm its test
   fails without it.
 
 - [CheckoutTest.php](../../tests/Feature/CheckoutTest.php): guest
@@ -115,7 +157,6 @@ Stripe gateway replaces it when keys are configured.
 
 | Commit | Adds                                                                                 |
 | ------ | ------------------------------------------------------------------------------------ |
-| 5      | Hold expiry: release unpaid holds after 20 minutes                                   |
 | 6      | Real Stripe gateway (SDK already installed for the webhook)                          |
 | 7–8    | UPS shipping rates (fake, then the real UPS Rating API); shipping added to the total |
 | 9      | Buy button and card form (`@stripe/stripe-js`)                                       |

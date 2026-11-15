@@ -175,3 +175,18 @@ test('if applying an event fails, nothing is recorded, so Stripe\'s retry applie
     expect($this->payment->fresh()->status)->toBe(PaymentStatus::Succeeded)
         ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Sold);
 });
+
+test('a payment that lands after its order was cancelled is flagged for a refund, not sold', function () {
+    Log::spy();
+    // The hold expired and was released before the payment landed.
+    $this->order->update(['status' => 'cancelled']);
+    $this->payment->update(['status' => 'failed']);
+    $this->piece->update(['status' => 'published', 'held_until' => null]);
+
+    ($this->deliver)(($this->succeeded)())->assertOk();
+
+    expect($this->order->fresh()->status)->toBe(OrderStatus::Cancelled)
+        ->and($this->payment->fresh()->status)->toBe(PaymentStatus::Failed)
+        ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Published);
+    Log::shouldHaveReceived('critical')->withArgs(fn (string $message) => str_contains($message, 'refund it'))->once();
+});

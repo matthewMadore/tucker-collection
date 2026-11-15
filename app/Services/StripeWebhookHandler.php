@@ -5,6 +5,7 @@ namespace App\Services;
 use App\Enums\ArtPieceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Models\Order;
 use App\Models\Payment;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
@@ -48,7 +49,7 @@ class StripeWebhookHandler
      */
     private function paymentSucceeded(string $eventId, array $intent): void
     {
-        $payment = Payment::with('order.items.artPiece')
+        $payment = Payment::query()
             ->where('stripe_payment_intent_id', $intent['id'] ?? null)
             ->first();
 
@@ -61,6 +62,24 @@ class StripeWebhookHandler
         // Already paid through an earlier event (Stripe can send the same
         // outcome under a new event id): never move it backwards.
         if ($payment->status === PaymentStatus::Succeeded) {
+            return;
+        }
+
+        // Lock the order so the hold-expiry job can't cancel it mid-update.
+        $order = Order::with('items.artPiece')->lockForUpdate()->findOrFail($payment->order_id);
+
+        // The hold expired and the order was cancelled before the payment
+        // landed. Expiry cancels the payment at Stripe first, so this should
+        // be rare, but if it happens the buyer was charged for a piece that's
+        // back on sale: flag it for a refund instead of selling it.
+        if ($order->status !== OrderStatus::Pending) {
+            Log::critical('Stripe payment succeeded for an order that is no longer pending; refund it.', [
+                'event' => $eventId,
+                'payment_id' => $payment->id,
+                'order_id' => $order->id,
+                'order_status' => $order->status->value,
+            ]);
+
             return;
         }
 
@@ -86,9 +105,9 @@ class StripeWebhookHandler
         }
         $payment->transitionTo(PaymentStatus::Succeeded, ['stripe_event_id' => $eventId]);
 
-        $payment->order->transitionTo(OrderStatus::Paid, ['placed_at' => now()]);
+        $order->transitionTo(OrderStatus::Paid, ['placed_at' => now()]);
 
-        foreach ($payment->order->items as $item) {
+        foreach ($order->items as $item) {
             $item->artPiece->transitionTo(ArtPieceStatus::Sold, ['held_until' => null]);
         }
     }

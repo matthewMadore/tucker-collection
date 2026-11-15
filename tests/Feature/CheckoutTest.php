@@ -107,6 +107,8 @@ test('if the payment gateway fails, nothing is saved and the piece stays publish
         {
             throw new RuntimeException('Stripe is down.');
         }
+
+        public function cancelIntent(string $intentId): void {}
     });
     $piece = ArtPiece::factory()->create(['status' => 'published']);
 

@@ -4,6 +4,8 @@ namespace App\Services;
 
 use App\Contracts\PaymentGateway;
 use App\Enums\ArtPieceStatus;
+use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Exceptions\PieceUnavailableException;
 use App\Models\ArtPiece;
 use App\Models\Order;
@@ -72,6 +74,38 @@ class CheckoutService
             ]);
 
             return ['order' => $order, 'clientSecret' => $intent->clientSecret];
+        });
+    }
+
+    /**
+     * Give up on an unpaid order whose hold expired: cancel the payment at
+     * Stripe first, so the buyer can no longer pay for a piece that's back
+     * on sale, then cancel the order and put the piece back on sale.
+     *
+     * If Stripe refuses to cancel (the payment already went through), this
+     * throws and nothing changes; the webhook will mark the order paid.
+     */
+    public function releaseHold(Order $order): void
+    {
+        if ($order->payment !== null) {
+            $this->gateway->cancelIntent($order->payment->stripe_payment_intent_id);
+        }
+
+        DB::transaction(function () use ($order): void {
+            // Lock the order so a webhook marking it paid can't interleave.
+            $order = Order::with(['payment', 'items.artPiece'])->lockForUpdate()->findOrFail($order->id);
+
+            if ($order->status !== OrderStatus::Pending) {
+                return;
+            }
+
+            $order->transitionTo(OrderStatus::Cancelled);
+            $order->payment?->transitionTo(PaymentStatus::Failed);
+
+            foreach ($order->items as $item) {
+                $item->update(['voided_at' => now()]);
+                $item->artPiece->transitionTo(ArtPieceStatus::Published, ['held_until' => null]);
+            }
         });
     }
 }

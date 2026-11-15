@@ -17,4 +17,6 @@ class FakeStripePaymentGateway implements PaymentGateway
 
         return new PaymentIntent($id, "{$id}_secret_".Str::random(16));
     }
+
+    public function cancelIntent(string $intentId): void {}
 }
