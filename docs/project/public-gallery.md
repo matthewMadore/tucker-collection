@@ -43,14 +43,14 @@ accounts are created from the command line.
 | GET    | `/art-pieces/{artPiece}`        | `art-pieces.show`          | auth + verified   | [ArtPieceController::show](../../app/Http/Controllers/ArtPieceController.php#L40)         |
 | PATCH  | `/art-pieces/{artPiece}/status` | `art-pieces.status.update` | auth + verified   | [ArtPieceController::updateStatus](../../app/Http/Controllers/ArtPieceController.php#L60) |
 
-Defined in [routes/web.php](../../routes/web.php#L7).
+Defined in [routes/web.php](../../routes/web.php#L10).
 
 ## Call chain: publishing a piece
 
 | #   | Location                                                                                   | Responsibility                                                                                         |
 | --- | ------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------ |
 | 1   | [art-pieces/Show.vue:42](../../resources/js/pages/art-pieces/Show.vue#L42)                 | `changeStatus()` sends `PATCH /art-pieces/{id}/status` with `{ status }` via `useForm`.                |
-| 2   | [routes/web.php:14](../../routes/web.php#L14)                                              | Inside the `auth` + `verified` group: guests are redirected to login.                                  |
+| 2   | [routes/web.php:23](../../routes/web.php#L23)                                              | Inside the `auth` + `verified` group: guests are redirected to login.                                  |
 | 3   | [UpdateArtPieceStatusRequest.php](../../app/Http/Requests/UpdateArtPieceStatusRequest.php) | `Rule::enum(ArtPieceStatus::class)`: anything else fails with "The selected status is invalid."        |
 | 4   | [ArtPieceController.php:60](../../app/Http/Controllers/ArtPieceController.php#L60)         | Saves the status, flashes the toast, redirects back. Inertia reloads the page props.                   |
 | 5   | Postgres                                                                                   | The `status_valid` CHECK constraint rejects unknown values even if application validation is bypassed. |
@@ -59,7 +59,7 @@ Defined in [routes/web.php](../../routes/web.php#L7).
 
 | #   | Location                                                                         | Responsibility                                                                                             |
 | --- | -------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:7](../../routes/web.php#L7)                                      | Public route, no middleware beyond `web`.                                                                  |
+| 1   | [routes/web.php:10](../../routes/web.php#L10)                                    | Public route, no middleware beyond `web`.                                                                  |
 | 2   | [GalleryController.php:15](../../app/Http/Controllers/GalleryController.php#L15) | `ArtPiece::visibleToPublic()`, images eager-loaded in `position` order, paginated.                         |
 | 3   | [ArtPiece.php:47](../../app/Models/ArtPiece.php#L47)                             | The `visibleToPublic` scope: `WHERE status IN ('published', 'held', 'sold')`.                              |
 | 4   | [gallery/Index.vue](../../resources/js/pages/gallery/Index.vue)                  | Renders inside [PublicLayout.vue](../../resources/js/layouts/PublicLayout.vue) (logo, Log in / Dashboard). |

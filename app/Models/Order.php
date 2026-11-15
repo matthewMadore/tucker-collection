@@ -10,6 +10,7 @@ use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Database\Eloquent\Relations\HasOne;
+use Illuminate\Support\Facades\URL;
 
 /**
  * A guest checkout: the buyer is identified by email, not a user account.
@@ -62,5 +63,15 @@ class Order extends Model
     public function shipment(): HasOne
     {
         return $this->hasOne(Shipment::class);
+    }
+
+    /**
+     * The buyer's link to this order, as sent in their email. Signed, so
+     * changing the order id in it doesn't open someone else's order; it
+     * doesn't expire, so the email keeps working.
+     */
+    public function viewUrl(): string
+    {
+        return URL::signedRoute('orders.show', $this);
     }
 }

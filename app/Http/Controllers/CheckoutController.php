@@ -7,9 +7,8 @@ use App\Models\ArtPiece;
 use App\Models\Payment;
 use App\Services\CheckoutService;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
-use Inertia\Inertia;
-use Inertia\Response;
 
 class CheckoutController extends Controller
 {
@@ -41,23 +40,16 @@ class CheckoutController extends Controller
     }
 
     /**
-     * Where Stripe sends the buyer after the card form. The order status
-     * shown comes from our database, which only the webhook marks paid; the
-     * query string is just Stripe telling us which payment this was.
+     * Where Stripe sends the buyer after the card form. The query string only
+     * says which payment this was; the order page shows our own status for
+     * it, which only the webhook marks paid.
      */
-    public function complete(Request $request): Response
+    public function complete(Request $request): RedirectResponse
     {
-        $payment = Payment::with('order.items')
+        $payment = Payment::with('order')
             ->where('stripe_payment_intent_id', (string) $request->query('payment_intent'))
             ->firstOrFail();
 
-        return Inertia::render('gallery/CheckoutComplete', [
-            'order' => [
-                'status' => $payment->order->status->value,
-                'piece_name' => $payment->order->items->first()?->name_snapshot,
-                'total_cents' => $payment->order->total_cents,
-                'buyer_email' => $payment->order->buyer_email,
-            ],
-        ]);
+        return redirect($payment->order->viewUrl());
     }
 }

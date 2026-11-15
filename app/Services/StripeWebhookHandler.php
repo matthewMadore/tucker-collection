@@ -5,10 +5,14 @@ namespace App\Services;
 use App\Enums\ArtPieceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Mail\OrderConfirmed;
+use App\Mail\OrderReceived;
 use App\Models\Order;
 use App\Models\Payment;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 
 /**
  * Applies verified Stripe events. The webhook, not the buyer's browser, is
@@ -110,5 +114,9 @@ class StripeWebhookHandler
         foreach ($order->items as $item) {
             $item->artPiece->transitionTo(ArtPieceStatus::Sold, ['held_until' => null]);
         }
+
+        // Both are queued to send after this transaction commits.
+        Mail::to($order->buyer_email)->queue(new OrderConfirmed($order));
+        Mail::to(User::all())->queue(new OrderReceived($order));
     }
 }

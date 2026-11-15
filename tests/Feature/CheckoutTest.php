@@ -5,7 +5,6 @@ use App\Enums\ArtPieceStatus;
 use App\Gateways\FlatRateShippingProvider;
 use App\Models\ArtPiece;
 use App\Models\Order;
-use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Services\CheckoutService;
 
@@ -151,25 +150,14 @@ test('the fake UPS rate adds $5 of insurance per full $1,000 of the piece\'s pri
     '$2,500' => [250_000, 5_500],
 ]);
 
-test('the confirmation page shows the order from our database, not from Stripe\'s redirect', function (string $status) {
-    $piece = ArtPiece::factory()->create(['name' => 'Charcoal Owl']);
-    $order = Order::factory()->create(['status' => $status, 'total_cents' => 46_500, 'buyer_email' => 'buyer@example.com']);
-    OrderItem::factory()->for($order)->for($piece)->create();
+test('Stripe\'s return link redirects the buyer to their signed order page', function () {
+    $order = Order::factory()->create();
     Payment::factory()->for($order)->create(['stripe_payment_intent_id' => 'pi_return_1']);
 
-    // Stripe's redirect claims success either way; the page trusts the order.
     $this->get(route('checkout.complete', ['payment_intent' => 'pi_return_1', 'redirect_status' => 'succeeded']))
-        ->assertOk()
-        ->assertInertia(fn ($page) => $page
-            ->component('gallery/CheckoutComplete')
-            ->where('order', [
-                'status' => $status,
-                'piece_name' => 'Charcoal Owl',
-                'total_cents' => 46_500,
-                'buyer_email' => 'buyer@example.com',
-            ]));
-})->with(['paid', 'pending', 'cancelled']);
+        ->assertRedirect($order->viewUrl());
+});
 
-test('the confirmation page is not found for an unknown payment', function () {
+test('Stripe\'s return link is not found for an unknown payment', function () {
     $this->get(route('checkout.complete', ['payment_intent' => 'pi_unknown']))->assertNotFound();
 });

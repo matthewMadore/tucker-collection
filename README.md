@@ -21,6 +21,7 @@ Each step below is a real prerequisite for the next, not boilerplate ritual:
     ./vendor/bin/sail artisan app:create-user    # sign-up is disabled, so logins are created here
     npm run dev
     ./vendor/bin/sail artisan schedule:work      # runs scheduled jobs (releases expired checkout holds)
+    ./vendor/bin/sail artisan queue:work         # sends queued email (order confirmations)
 
 Visit `http://localhost` for the public gallery and `http://localhost/login` to
 manage pieces. Mailpit (local email inbox) is at `http://localhost:8025`.

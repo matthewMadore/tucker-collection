@@ -3,16 +3,21 @@
 use App\Enums\ArtPieceStatus;
 use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
+use App\Mail\OrderConfirmed;
+use App\Mail\OrderReceived;
 use App\Models\ArtPiece;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
+use App\Models\User;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
+use Illuminate\Support\Facades\Mail;
 use Illuminate\Testing\TestResponse;
 
 beforeEach(function () {
     config(['services.stripe.webhook_secret' => 'whsec_test']);
+    Mail::fake();
 
     // A checkout that's waiting for payment: held piece, pending order and payment.
     $this->piece = ArtPiece::factory()->create(['status' => 'held', 'held_until' => now()->addMinutes(20), 'price_cents' => 42_000]);
@@ -58,11 +63,13 @@ beforeEach(function () {
         expect($this->payment->fresh()->status)->toBe(PaymentStatus::Pending)
             ->and($this->order->fresh()->status)->toBe(OrderStatus::Pending)
             ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Held);
+        Mail::assertNothingQueued();
     };
 });
 
 test('a succeeded payment marks the payment succeeded, the order paid and the piece sold', function () {
     $this->freezeSecond();
+    $owners = User::factory()->count(2)->create();
 
     ($this->deliver)(($this->succeeded)())->assertOk();
 
@@ -75,6 +82,9 @@ test('a succeeded payment marks the payment succeeded, the order paid and the pi
     expect($this->piece->fresh())
         ->status->toBe(ArtPieceStatus::Sold)
         ->held_until->toBeNull();
+
+    Mail::assertQueued(OrderConfirmed::class, fn (OrderConfirmed $mail) => $mail->hasTo($this->order->buyer_email) && $mail->order->is($this->order));
+    Mail::assertQueued(OrderReceived::class, fn (OrderReceived $mail) => $mail->hasTo($owners[0]->email) && $mail->hasTo($owners[1]->email));
 });
 
 test('a webhook signed with the wrong secret is rejected', function () {
@@ -124,6 +134,8 @@ test('a second success event with a new id cannot change an already paid order',
     expect($this->payment->fresh())
         ->status->toBe(PaymentStatus::Succeeded)
         ->stripe_event_id->toBe('evt_1');
+    // The buyer and owners are emailed once, not once per event.
+    Mail::assertQueuedCount(2);
 });
 
 test('a payment that doesn\'t match the order is flagged instead of paid', function (array $overrides) {
@@ -174,6 +186,7 @@ test('if applying an event fails, nothing is recorded, so Stripe\'s retry applie
 
     expect($this->payment->fresh()->status)->toBe(PaymentStatus::Succeeded)
         ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Sold);
+    Mail::assertQueued(OrderConfirmed::class, 1);
 });
 
 test('a payment that lands after its order was cancelled is flagged for a refund, not sold', function () {
@@ -188,5 +201,6 @@ test('a payment that lands after its order was cancelled is flagged for a refund
     expect($this->order->fresh()->status)->toBe(OrderStatus::Cancelled)
         ->and($this->payment->fresh()->status)->toBe(PaymentStatus::Failed)
         ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Published);
+    Mail::assertNothingQueued();
     Log::shouldHaveReceived('critical')->withArgs(fn (string $message) => str_contains($message, 'refund it'))->once();
 });

@@ -6,12 +6,13 @@ need an account; the order stores their email.
 
 **Status (2026-11-14):** buyers can check out from a piece's public page:
 shipping form, server-quoted UPS shipping, total, Stripe card form,
-confirmation page. Checkout, the webhook and hold expiry are verified end
+order page. Once paid, the buyer gets a confirmation email with a signed
+link to their order, and the owners get a "sold, ship it here" email. Checkout, the webhook and hold expiry are verified end
 to end in the running app on the fake/flat-rate providers. The real
 Stripe gateway, Stripe's card form and the live UPS provider switch on
 when their keys are set; they're tested against recorded or faked HTTP,
 not yet against live Stripe test mode or the UPS sandbox. Not built yet:
-emails and admin orders. See [Roadmap](#roadmap).
+admin orders. See [Roadmap](#roadmap).
 
 ## Checkout call chain
 
@@ -20,9 +21,9 @@ login; rate-limited. Returns JSON for the card form (not a page visit).
 
 | #   | Location                                                                           | Responsibility                                                                                                                                                                                                                                                      |
 | --- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:49](../../app/Providers/AppServiceProvider.php#L49)), against card-testing bots.                                                                                      |
+| 1   | [routes/web.php:12](../../routes/web.php#L12)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:49](../../app/Providers/AppServiceProvider.php#L49)), against card-testing bots.                                                                                      |
 | 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                                                                                                                |
-| 3   | [CheckoutController.php:23](../../app/Http/Controllers/CheckoutController.php#L23) | Drafts return 404, as on the public piece page.                                                                                                                                                                                                                     |
+| 3   | [CheckoutController.php:22](../../app/Http/Controllers/CheckoutController.php#L22) | Drafts return 404, as on the public piece page.                                                                                                                                                                                                                     |
 | 4   | [CheckoutService.php:40](../../app/Services/CheckoutService.php#L40)               | One transaction for steps 5–9: any failure rolls everything back and the piece stays published.                                                                                                                                                                     |
 | 5   | [CheckoutService.php:44](../../app/Services/CheckoutService.php#L44)               | **The hold:** `UPDATE art_pieces SET status = 'held', held_until = now() + 20 min WHERE id = ? AND status = 'published'`. 0 rows → 409 "This piece is no longer available."                                                                                         |
 | 6   | [CheckoutService.php:59](../../app/Services/CheckoutService.php#L59)               | **Shipping quote** from the `ShippingRateProvider` (UPS) for this piece and address, on the server.                                                                                                                                                                 |
@@ -37,17 +38,18 @@ Stripe calls `POST /stripe/webhook` when a payment completes. The webhook,
 not the buyer's browser, decides whether an order is paid: it's signed,
 retried by Stripe, and arrives even if the buyer closes the tab.
 
-| #   | Location                                                                                           | Responsibility                                                                                                                                                               |
-| --- | -------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 1   | [routes/web.php:15](../../routes/web.php#L15), [bootstrap/app.php:21](../../bootstrap/app.php#L21) | Public route, excluded from CSRF (Stripe can't send a token; the signature replaces it).                                                                                     |
-| 2   | [StripeWebhookController.php:21](../../app/Http/Controllers/StripeWebhookController.php#L21)       | No `STRIPE_WEBHOOK_SECRET` → 500 and log. An empty secret would let anyone sign a fake event.                                                                                |
-| 3   | [StripeWebhookController.php:28](../../app/Http/Controllers/StripeWebhookController.php#L28)       | `Stripe\Webhook::constructEvent()` checks the HMAC signature and rejects events older than 5 minutes → 400.                                                                  |
-| 4   | [StripeWebhookHandler.php:30](../../app/Services/StripeWebhookHandler.php#L30)                     | One transaction for steps 5–9.                                                                                                                                               |
-| 5   | [StripeWebhookHandler.php:31](../../app/Services/StripeWebhookHandler.php#L31)                     | Record the event id in `stripe_events_processed`; already there → skip (Stripe delivers at least once).                                                                      |
-| 6   | [StripeWebhookHandler.php:64](../../app/Services/StripeWebhookHandler.php#L64)                     | Payment already succeeded (same outcome under a new event id) → skip; statuses never move backwards.                                                                         |
-| 7   | [StripeWebhookHandler.php:69](../../app/Services/StripeWebhookHandler.php#L69)                     | Lock the order row. If it's no longer pending (its hold expired and it was cancelled), log **critical: refund it** and stop, instead of selling a piece that's back on sale. |
-| 8   | [StripeWebhookHandler.php:91](../../app/Services/StripeWebhookHandler.php#L91)                     | Amount or currency differs from the payment → log an error and leave the order unpaid for review.                                                                            |
-| 9   | [StripeWebhookHandler.php:108](../../app/Services/StripeWebhookHandler.php#L108)                   | Payment → processing → succeeded, order → paid (`placed_at`), piece → sold (`held_until` cleared).                                                                           |
+| #   | Location                                                                                           | Responsibility                                                                                                                                                                                        |
+| --- | -------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [routes/web.php:17](../../routes/web.php#L17), [bootstrap/app.php:21](../../bootstrap/app.php#L21) | Public route, excluded from CSRF (Stripe can't send a token; the signature replaces it).                                                                                                              |
+| 2   | [StripeWebhookController.php:21](../../app/Http/Controllers/StripeWebhookController.php#L21)       | No `STRIPE_WEBHOOK_SECRET` → 500 and log. An empty secret would let anyone sign a fake event.                                                                                                         |
+| 3   | [StripeWebhookController.php:28](../../app/Http/Controllers/StripeWebhookController.php#L28)       | `Stripe\Webhook::constructEvent()` checks the HMAC signature and rejects events older than 5 minutes → 400.                                                                                           |
+| 4   | [StripeWebhookHandler.php:34](../../app/Services/StripeWebhookHandler.php#L34)                     | One transaction for steps 5–10.                                                                                                                                                                       |
+| 5   | [StripeWebhookHandler.php:35](../../app/Services/StripeWebhookHandler.php#L35)                     | Record the event id in `stripe_events_processed`; already there → skip (Stripe delivers at least once).                                                                                               |
+| 6   | [StripeWebhookHandler.php:68](../../app/Services/StripeWebhookHandler.php#L68)                     | Payment already succeeded (same outcome under a new event id) → skip; statuses never move backwards.                                                                                                  |
+| 7   | [StripeWebhookHandler.php:73](../../app/Services/StripeWebhookHandler.php#L73)                     | Lock the order row. If it's no longer pending (its hold expired and it was cancelled), log **critical: refund it** and stop, instead of selling a piece that's back on sale.                          |
+| 8   | [StripeWebhookHandler.php:95](../../app/Services/StripeWebhookHandler.php#L95)                     | Amount or currency differs from the payment → log an error and leave the order unpaid for review.                                                                                                     |
+| 9   | [StripeWebhookHandler.php:107](../../app/Services/StripeWebhookHandler.php#L107)                   | Payment → processing → succeeded, order → paid (`placed_at`), piece → sold (`held_until` cleared).                                                                                                    |
+| 10  | [StripeWebhookHandler.php:119](../../app/Services/StripeWebhookHandler.php#L119)                   | Queue the buyer's [OrderConfirmed](../../app/Mail/OrderConfirmed.php) and the owners' [OrderReceived](../../app/Mail/OrderReceived.php) emails. See [Order emails](#order-emails-and-the-order-page). |
 
 Unknown payment intents and event types the app doesn't handle are
 acknowledged (200) so Stripe stops retrying; unknown intents are logged.
@@ -60,9 +62,8 @@ acknowledged (200) so Stripe stops retrying; unknown intents are logged.
   and the payment was silently lost. Here a failure rolls back both, the
   webhook returns 500, and Stripe's retry applies it.
 - **Handled in the request, not a queue.** It's a few queries, well
-  within Stripe's timeout, and it removes the need for a queue worker in
-  production. Stripe's retries give the same failure recovery a queue
-  would.
+  within Stripe's timeout, and Stripe's retries give the same failure
+  recovery a queue would. Only the emails are queued (see below).
 - **Signature check from the Stripe SDK** (`stripe/stripe-php`) instead of
   Fable's hand-written one, and no simulated webhook job: locally, the
   real Stripe test mode and `stripe listen` replace it.
@@ -80,11 +81,39 @@ Held and sold pieces show "reserved by another buyer" / "sold" instead.
 | 3   | Same component                                                                     | Shows piece + UPS shipping (service and days) = total, and "reserved for you for 20 minutes".                                                                                                                                                                                                                                                                                             |
 | 4   | [BuyArtPiece.vue:108](../../resources/js/components/BuyArtPiece.vue#L108)          | Loads Stripe.js with the **publishable** key (`STRIPE_KEY`, passed as a page prop by [GalleryController.php:55](../../app/Http/Controllers/GalleryController.php#L55); the secret key never reaches the browser) and mounts Stripe's Payment Element with the client secret. Without `STRIPE_KEY` it says card payments aren't set up, so the flow can be tried locally up to this point. |
 | 5   | [BuyArtPiece.vue:128](../../resources/js/components/BuyArtPiece.vue#L128)          | **Pay $total** calls `stripe.confirmPayment()`. A declined card shows Stripe's message and the buyer can try another card while the hold lasts. On success Stripe redirects to `/checkout/complete`.                                                                                                                                                                                      |
-| 6   | [CheckoutController.php:48](../../app/Http/Controllers/CheckoutController.php#L48) | The confirmation page looks the order up by the PaymentIntent id and shows **our** order status ("Thank you!" when paid, "Payment processing" while waiting for the webhook, "wasn't completed" if the hold ended). It ignores Stripe's `redirect_status` query parameter: only the webhook marks orders paid.                                                                            |
+| 6   | [CheckoutController.php:47](../../app/Http/Controllers/CheckoutController.php#L47) | Stripe's return link: looks the order up by the PaymentIntent id and redirects to the signed order page, which shows **our** order status ("Payment processing" until the webhook lands, then "Thank you!"). Stripe's `redirect_status` query parameter is ignored: only the webhook marks orders paid.                                                                                   |
 
 **Card payments need both Stripe keys:** `STRIPE_KEY` (publishable, for the
 browser) and `STRIPE_SECRET` (for the server). With only the publishable
 key, the fake gateway's client secret can't be used by Stripe.js.
+
+## Order emails and the order page
+
+Both emails are Markdown mailables (views in
+[resources/views/mail/](../../resources/views/mail/)), queued by the
+webhook with `afterCommit()`: they're only sent once the payment
+transaction commits, so a rolled-back payment never emails, and a mail
+outage can't roll back a payment. **A queue worker must be running**
+(`composer run dev` starts one; production needs `queue:work`).
+
+| Email                                               | To                  | Contains                                                                        |
+| --------------------------------------------------- | ------------------- | ------------------------------------------------------------------------------- |
+| [OrderConfirmed](../../app/Mail/OrderConfirmed.php) | the buyer           | piece, total, ship-to address, **View your order** link                         |
+| [OrderReceived](../../app/Mail/OrderReceived.php)   | every user (owners) | piece, total and shipping paid, ship-to address, buyer email, link to the piece |
+
+Stripe also emails its own card receipt (`receipt_email`).
+
+Call chain for the buyer's link:
+
+| #   | Location                                                              | Responsibility                                                                                                                                                                     |
+| --- | --------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 1   | [Order.php:73](../../app/Models/Order.php#L73)                        | `viewUrl()` builds `URL::signedRoute('orders.show', $order)`: the URL plus an HMAC signature made with `APP_KEY`. No expiry, so the link in the email keeps working.               |
+| 2   | [routes/web.php:16](../../routes/web.php#L16)                         | `GET /orders/{order}` with the `signed` middleware: a missing signature, or a link edited to another order's id, → 403. Buyers have no accounts, so the signature is their access. |
+| 3   | [OrderController.php](../../app/Http/Controllers/OrderController.php) | Renders [gallery/Order.vue](../../resources/js/pages/gallery/Order.vue): status heading, piece, shipping, total, ship-to address.                                                  |
+
+Stripe's return link (`/checkout/complete`) redirects to the same page,
+so there's one order page instead of a confirmation page and an order
+page. Fable sent a plain-text email with no link and no owner email.
 
 ## Hold expiry
 
@@ -211,25 +240,39 @@ Test mode uses fake cards and never moves money.
 3. Keep `./vendor/bin/sail artisan schedule:work` running so expired holds
    are released.
 
-Until the card form exists (commit 9), a payment can be completed from
-the Stripe dashboard or with `stripe payment_intents confirm <pi_id>
---payment-method=pm_card_visa`; the webhook then marks the order paid.
+Also set `STRIPE_KEY` (the publishable `pk_test_...` key) so the card
+form appears, and keep a queue worker running for the order emails
+(they arrive in Mailpit at `http://localhost:8025`).
 
 In production, the webhook signing secret comes from the endpoint added
 in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Tests
 
+- Order emails and page:
+  [OrderEmailsTest.php](../../tests/Feature/OrderEmailsTest.php) renders
+  both emails (piece, totals, address, links; buyer-typed text is
+  escaped) and proves they aren't sent if the payment transaction rolls
+  back; [OrderPageTest.php](../../tests/Feature/OrderPageTest.php): the
+  signed link shows the order, an unsigned link or one edited to another
+  order → 403; [StripeWebhookTest.php](../../tests/Feature/StripeWebhookTest.php)
+  checks both emails are queued once on payment, to the buyer and every
+  owner, and never for redelivered, mismatched, late or rejected events.
+  Removing `afterCommit()` or the `signed` middleware fails these tests.
+  In a browser: the webhook is delivered, the queue worker sends exactly
+  two emails to Mailpit, and the buyer's **View your order** link opens
+  "Thank you!" with the total and address on an iPhone.
+
 - Buy flow: [CheckoutTest.php](../../tests/Feature/CheckoutTest.php)
-  covers the confirmation page (it shows the order's real status for
-  paid, pending and cancelled orders even when the redirect claims
-  success; unknown payments → 404), and
+  covers Stripe's return link (redirects to the signed order page;
+  unknown payments → 404), and
   [GalleryTest.php](../../tests/Feature/GalleryTest.php) checks the piece
   page passes the publishable key and never the secret key. In a browser
   (iPhone and desktop): two buyers compete for one piece; the first sees
   $100 + $45 = $145 and is reserved, the second is told it's no longer
-  available and the Buy button disappears; the confirmation page shows
-  "Payment processing" and then "Thank you!" once paid.
+  available and the Buy button disappears; the return link lands on the
+  order page showing "Payment processing" even when Stripe's redirect
+  claims success.
 
 - [UpsShippingRateProviderTest.php](../../tests/Feature/UpsShippingRateProviderTest.php):
   with UPS faked over HTTP, a quote logs in with Basic auth, sends a
@@ -284,7 +327,6 @@ in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 | Commit | Adds                                                              |
 | ------ | ----------------------------------------------------------------- |
-| 10     | Order emails and a signed "view your order" link                  |
 | 11     | Admin orders: mark shipped, refund (calls Stripe, unlike Fable's) |
 | 12     | Disputes and dashboard refunds via webhooks                       |
 
@@ -294,6 +336,13 @@ in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
   the redirect have only run without a Stripe key. Try a full test-mode
   payment once `STRIPE_KEY`/`STRIPE_SECRET` are set (cards `4242…` success,
   `4000 0000 0000 0002` decline, `4000 0027 6000 3184` 3D Secure).
+- **Emails say "Laravel":** the sender name, header logo and sign-off
+  come from `APP_NAME` and Laravel's default mail theme until branding is
+  set.
+- **Anyone with the return link sees the order page:** the PaymentIntent
+  id in `/checkout/complete?payment_intent=...` leads to the order page
+  (address included). Those ids are random and only appear in the
+  buyer's own browser, so this matches the signed link's exposure.
 - **US shipping only:** the form sends `country: US`; international needs
   a country field and UPS international services.
 - **Buy section placement on phones:** on pieces with many photos it sits
