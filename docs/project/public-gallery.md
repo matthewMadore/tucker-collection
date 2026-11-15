@@ -72,11 +72,14 @@ Defined in [routes/web.php](../../routes/web.php#L7).
   from `ArtPieceStatus::options()`. The values match the database CHECK
   constraint.
 - **Status state machine:** `allowedTransitions()` on the enum lists
-  every legal move; anything else is illegal. `ArtPiece::transitionTo()`
-  throws on an illegal move, and the admin request rejects it with
-  "Can't change status from Sold to Draft." The same pattern
-  ([HasStatusTransitions](../../app/Concerns/HasStatusTransitions.php))
-  backs `PaymentStatus` and `OrderStatus` for checkout.
+  every legal move; anything else is illegal. Two shared traits implement
+  it for every status in the app (pieces, orders, payments):
+  [HasStatusTransitions](../../app/Concerns/HasStatusTransitions.php) on
+  the enum (`canTransitionTo()`), and
+  [TransitionsStatus](../../app/Concerns/TransitionsStatus.php) on the
+  model (`transitionTo($status, [extra columns])`, which throws on an
+  illegal move and saves nothing). The admin request rejects an illegal
+  move with "Can't change status from Sold to Draft."
 
     | From      | Allowed to                        |
     | --------- | --------------------------------- |

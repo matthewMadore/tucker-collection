@@ -8,13 +8,19 @@ Markdown preview render Mermaid blocks as diagrams.
 ```mermaid
 erDiagram
     art_pieces ||--o{ art_piece_images : "has many (ON DELETE CASCADE)"
+    art_pieces ||--o{ order_items : "sold as (at most one live)"
+    orders ||--|{ order_items : "contains"
+    orders ||--o| payments : "paid by"
+    orders ||--o| shipments : "shipped as"
 
     art_pieces {
         bigint id PK
         varchar name "NOT NULL"
         text description "NOT NULL, default ''"
         bigint price_cents "NOT NULL, CHECK > 0"
+        char currency "default USD"
         varchar status "default 'draft', CHECK in (draft, published, held, sold)"
+        timestamptz held_until "checkout hold expiry, null for manual holds"
         timestamp created_at
         timestamp updated_at
     }
@@ -27,11 +33,77 @@ erDiagram
         timestamp created_at
         timestamp updated_at
     }
+
+    orders {
+        bigint id PK
+        varchar buyer_email "guest checkout, no user account"
+        varchar status "CHECK in (pending, paid, fulfilled, delivered, cancelled, refunded)"
+        bigint subtotal_cents "CHECK >= 0"
+        bigint shipping_cents "CHECK >= 0"
+        bigint total_cents "CHECK >= 0"
+        char currency
+        jsonb shipping_address
+        timestamptz placed_at
+    }
+
+    order_items {
+        bigint id PK
+        bigint order_id FK "ON DELETE RESTRICT"
+        bigint art_piece_id FK "ON DELETE RESTRICT"
+        varchar name_snapshot "copied at purchase"
+        bigint price_cents_snapshot "copied at purchase"
+        timestamptz voided_at "set when the order is cancelled"
+    }
+
+    payments {
+        bigint id PK
+        bigint order_id FK
+        varchar stripe_payment_intent_id "UNIQUE"
+        varchar stripe_event_id "last event that moved the status"
+        varchar status "CHECK in (pending, processing, succeeded, failed, refunded, disputed)"
+        bigint amount_cents "CHECK >= 0"
+        char currency
+    }
+
+    shipments {
+        bigint id PK
+        bigint order_id FK
+        varchar carrier "default ups"
+        varchar tracking_number
+        varchar status "CHECK in (pending, label_created, in_transit, delivered, exception)"
+        bigint quoted_rate_cents
+    }
+
+    stripe_events_processed {
+        varchar stripe_event_id PK "webhook idempotency ledger"
+        varchar type
+        timestamptz processed_at
+    }
 ```
 
-`art_pieces` and `users` are not related yet. When the admin concept
-and orders exist, the links (who created or bought a piece) will be
-added here.
+`users` are only the people who manage the site, so they aren't linked
+to these tables. Buyers check out as guests; an order stores
+`buyer_email` instead of a user id.
+
+### Checkout tables: what the database guarantees
+
+Ported from the Fable version, with `user_id` replaced by `buyer_email`.
+
+- **A piece sells once.** A partial unique index,
+  `order_items (art_piece_id) WHERE voided_at IS NULL`, allows at most one
+  live order item per piece even if two checkouts race past the app code.
+  Cancelling an order voids its items, which frees the piece.
+- **A Stripe payment is recorded once.** `stripe_payment_intent_id` is
+  unique.
+- **A webhook event is handled once.** `stripe_events_processed` has the
+  event id as its primary key; the handler inserts it first and skips the
+  event if it was already there.
+- **Statuses are valid.** Each status column has a CHECK constraint that
+  mirrors its PHP enum; the enums also define which status changes are
+  allowed (see [public-gallery.md](public-gallery.md#key-decisions)).
+- **History is kept.** Foreign keys from order data are `RESTRICT`, so a
+  piece or order with sales history can't be deleted out from under it,
+  and items keep a snapshot of the name and price paid.
 
 ## Diagram: framework tables
 
@@ -197,12 +269,6 @@ leaves out, since the current form doesn't collect them yet:
 - `series`, `year`, `medium`, `width_mm`, `height_mm` — descriptive
   metadata for the physical piece.
 - `provenance` (jsonb) — acquisition history, schemaless per piece.
-- `currency` — assumed USD for now; add when multi-currency is a real
-  requirement, not before.
-- `held_until` — part of a `held` status lifecycle (a piece
-  temporarily reserved for a buyer). The `status` column already
-  allows `'held'` as a value, but the actual hold-expiry logic isn't
-  built yet.
 - On images: `is_primary` (which image is the main display photo),
   and resized `derivatives` (thumbnails). Uploads are now real files
   stored by `path` on the local `public` disk; moving them to S3 is a

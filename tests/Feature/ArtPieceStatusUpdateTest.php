@@ -54,7 +54,7 @@ test('the model refuses an illegal transition instead of saving it', function ()
     $piece = ArtPiece::factory()->create(['status' => 'sold']);
 
     expect(fn () => $piece->transitionTo(ArtPieceStatus::Draft))
-        ->toThrow(DomainException::class, 'Cannot change an art piece from sold to draft.');
+        ->toThrow(DomainException::class, 'Cannot change art piece from sold to draft.');
 
     expect($piece->fresh()->status)->toBe(ArtPieceStatus::Sold);
 });

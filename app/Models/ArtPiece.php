@@ -2,9 +2,10 @@
 
 namespace App\Models;
 
+use App\Concerns\TransitionsStatus;
 use App\Enums\ArtPieceStatus;
+use Carbon\CarbonImmutable;
 use Database\Factories\ArtPieceFactory;
-use DomainException;
 use Illuminate\Database\Eloquent\Attributes\Scope;
 use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
@@ -13,13 +14,14 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
 
 /**
  * @property ArtPieceStatus $status
+ * @property ?CarbonImmutable $held_until
  */
 class ArtPiece extends Model
 {
     /** @use HasFactory<ArtPieceFactory> */
-    use HasFactory;
+    use HasFactory, TransitionsStatus;
 
-    protected $fillable = ['name', 'description', 'price_cents', 'status'];
+    protected $fillable = ['name', 'description', 'price_cents', 'currency', 'status', 'held_until'];
 
     /**
      * @return array<string, string>
@@ -28,6 +30,7 @@ class ArtPiece extends Model
     {
         return [
             'status' => ArtPieceStatus::class,
+            'held_until' => 'datetime',
         ];
     }
 
@@ -40,17 +43,11 @@ class ArtPiece extends Model
     }
 
     /**
-     * The only way status should change: illegal moves throw instead of saving.
-     *
-     * @throws DomainException
+     * @return HasMany<OrderItem, $this>
      */
-    public function transitionTo(ArtPieceStatus $to): void
+    public function orderItems(): HasMany
     {
-        if (! $this->status->canTransitionTo($to)) {
-            throw new DomainException("Cannot change an art piece from {$this->status->value} to {$to->value}.");
-        }
-
-        $this->update(['status' => $to]);
+        return $this->hasMany(OrderItem::class);
     }
 
     /**
