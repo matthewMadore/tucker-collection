@@ -5,11 +5,11 @@ Guest checkout for a single piece, ported from the Fable version
 need an account; the order stores their email.
 
 **Status (2026-11-14):** checkout, the payment webhook and hold expiry
-work end to end on the fake gateway (verified in the running app:
-checkout → signed webhook → paid and sold; checkout → hold expires →
-cancelled and back on sale). Not built yet: the real Stripe gateway, UPS
-shipping rates, the card form, emails, and admin orders. See
-[Roadmap](#roadmap).
+work end to end on the fake gateway (verified in the running app). The
+real Stripe gateway is in place and used whenever `STRIPE_SECRET` is set;
+it's tested against a recorded Stripe HTTP layer but not yet against a
+live Stripe test account. Not built yet: UPS shipping rates, the card
+form, emails, and admin orders. See [Roadmap](#roadmap).
 
 ## Checkout call chain
 
@@ -18,7 +18,7 @@ login; rate-limited. Returns JSON for the card form (not a page visit).
 
 | #   | Location                                                                           | Responsibility                                                                                                                                                                 |
 | --- | ---------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
-| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:34](../../app/Providers/AppServiceProvider.php#L34)), against card-testing bots. |
+| 1   | [routes/web.php:11](../../routes/web.php#L11)                                      | Public route with `throttle:checkout`: 10 attempts per minute per IP ([AppServiceProvider.php:40](../../app/Providers/AppServiceProvider.php#L40)), against card-testing bots. |
 | 2   | [CheckoutRequest.php](../../app/Http/Requests/CheckoutRequest.php)                 | Validates email and shipping address. Has no amount field by design.                                                                                                           |
 | 3   | [CheckoutController.php:19](../../app/Http/Controllers/CheckoutController.php#L19) | Drafts return 404, as on the public piece page.                                                                                                                                |
 | 4   | [CheckoutService.php:35](../../app/Services/CheckoutService.php#L35)               | One transaction for steps 5–8: any failure rolls everything back and the piece stays published.                                                                                |
@@ -115,14 +115,48 @@ checkout rate limit instead.
 ## The payment gateway seam
 
 [PaymentGateway](../../app/Contracts/PaymentGateway.php) is the only
-interface the app uses to talk to Stripe. Gateways return a
+interface the app uses to talk to Stripe: `createIntent()` and
+`cancelIntent()`. Gateways return a
 [PaymentIntent](../../app/Gateways/PaymentIntent.php) (id + client secret),
 so no Stripe SDK type leaks into the app.
-[FakeStripePaymentGateway](../../app/Gateways/FakeStripePaymentGateway.php)
-is bound in `AppServiceProvider` for local development and tests; the real
-Stripe gateway replaces it when keys are configured.
+
+| Gateway                                                                     | Used when                                                                                            | Behavior                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| [StripePaymentGateway](../../app/Gateways/StripePaymentGateway.php)         | `STRIPE_SECRET` is set ([AppServiceProvider.php:27](../../app/Providers/AppServiceProvider.php#L27)) | Creates a PaymentIntent for the order total with `order_id` metadata and `receipt_email` (Stripe emails the buyer a receipt). Sends an idempotency key per order ([line 30](../../app/Gateways/StripePaymentGateway.php#L30)), so a retried request can't create a second payment. `cancelIntent()` treats "already cancelled" as success and throws on anything else, such as "already succeeded" ([line 43](../../app/Gateways/StripePaymentGateway.php#L43)), which keeps the hold. |
+| [FakeStripePaymentGateway](../../app/Gateways/FakeStripePaymentGateway.php) | `STRIPE_SECRET` is empty                                                                             | Returns fake ids; cancelling does nothing. Local development works without a Stripe account.                                                                                                                                                                                                                                                                                                                                                                                           |
+
+`phpunit.xml` forces `STRIPE_SECRET` to empty, so the test suite never
+calls Stripe, even when `.env` has real keys.
+
+## Running locally with Stripe test mode
+
+Test mode uses fake cards and never moves money.
+
+1. Create a Stripe account; in the dashboard, switch to **Test mode** and
+   copy the secret key (`sk_test_...`) into `.env` as `STRIPE_SECRET`.
+2. Install the Stripe CLI (`brew install stripe/stripe-cli/stripe`), run
+   `stripe login`, then forward webhooks to the app:
+   `stripe listen --forward-to localhost/stripe/webhook`. It prints a
+   signing secret (`whsec_...`): put it in `.env` as
+   `STRIPE_WEBHOOK_SECRET`.
+3. Keep `./vendor/bin/sail artisan schedule:work` running so expired holds
+   are released.
+
+Until the card form exists (commit 9), a payment can be completed from
+the Stripe dashboard or with `stripe payment_intents confirm <pi_id>
+--payment-method=pm_card_visa`; the webhook then marks the order paid.
+
+In production, the webhook signing secret comes from the endpoint added
+in the Stripe dashboard (Developers → Webhooks) instead of `stripe listen`.
 
 ## Tests
+
+- [StripePaymentGatewayTest.php](../../tests/Feature/StripePaymentGatewayTest.php):
+  runs the real Stripe SDK over a recording HTTP client. Creating a
+  payment sends the total, currency, metadata, receipt email and
+  idempotency key; cancelling hits the cancel endpoint; an already
+  cancelled payment is fine; an already succeeded one throws; the real
+  gateway is used only when a secret key is set.
 
 - [HoldExpiryTest.php](../../tests/Feature/HoldExpiryTest.php): an
   expired hold cancels the payment at Stripe, cancels the order, fails the
@@ -157,7 +191,6 @@ Stripe gateway replaces it when keys are configured.
 
 | Commit | Adds                                                                                 |
 | ------ | ------------------------------------------------------------------------------------ |
-| 6      | Real Stripe gateway (SDK already installed for the webhook)                          |
 | 7–8    | UPS shipping rates (fake, then the real UPS Rating API); shipping added to the total |
 | 9      | Buy button and card form (`@stripe/stripe-js`)                                       |
 | 10     | Order emails and a signed "view your order" link                                     |

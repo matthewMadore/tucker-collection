@@ -4,6 +4,7 @@ namespace App\Providers;
 
 use App\Contracts\PaymentGateway;
 use App\Gateways\FakeStripePaymentGateway;
+use App\Gateways\StripePaymentGateway;
 use Carbon\CarbonImmutable;
 use Illuminate\Cache\RateLimiting\Limit;
 use Illuminate\Http\Request;
@@ -12,6 +13,7 @@ use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\RateLimiter;
 use Illuminate\Support\ServiceProvider;
 use Illuminate\Validation\Rules\Password;
+use Stripe\StripeClient;
 
 class AppServiceProvider extends ServiceProvider
 {
@@ -20,7 +22,11 @@ class AppServiceProvider extends ServiceProvider
      */
     public function register(): void
     {
-        $this->app->bind(PaymentGateway::class, FakeStripePaymentGateway::class);
+        // Real Stripe when a secret key is configured, the fake otherwise.
+        // phpunit.xml clears the key, so tests never call Stripe.
+        $this->app->bind(PaymentGateway::class, fn (): PaymentGateway => filled(config('services.stripe.secret'))
+            ? new StripePaymentGateway(new StripeClient((string) config('services.stripe.secret')))
+            : new FakeStripePaymentGateway);
     }
 
     /**

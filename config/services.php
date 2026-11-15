@@ -29,6 +29,9 @@ return [
     ],
 
     'stripe' => [
+        // Secret key (sk_test_... / sk_live_...). When empty, the app uses the
+        // fake payment gateway, so local development works without Stripe.
+        'secret' => env('STRIPE_SECRET'),
         // From the Stripe dashboard's webhook endpoint, or `stripe listen` locally.
         'webhook_secret' => env('STRIPE_WEBHOOK_SECRET'),
     ],
