@@ -6,11 +6,14 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Mail\OrderConfirmed;
 use App\Mail\OrderReceived;
+use App\Mail\OrderUpdated;
+use App\Mail\PaymentDisputed;
 use App\Models\ArtPiece;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Payment;
 use App\Models\User;
+use App\Services\OrderService;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -215,4 +218,115 @@ test('a payment that lands after its order was cancelled is refunded, not sold',
         ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Published);
     Mail::assertNothingQueued();
     Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, 'refunded it'))->once();
+});
+
+describe('refunds and disputes made outside the app', function () {
+    beforeEach(function () {
+        // Paid through the real webhook first, as in production.
+        ($this->deliver)(($this->succeeded)('evt_paid'))->assertOk();
+        Mail::fake();
+
+        /** @param array<string, mixed> $object */
+        $this->event = fn (string $id, string $type, array $object): array => [
+            'id' => $id, 'object' => 'event', 'type' => $type, 'data' => ['object' => $object],
+        ];
+        $this->charge = fn (array $overrides = []): array => [
+            'id' => 'ch_1', 'object' => 'charge', 'payment_intent' => 'pi_test_1',
+            'amount' => 42_000, 'amount_refunded' => 42_000, 'refunded' => true, ...$overrides,
+        ];
+        $this->dispute = fn (string $status, array $overrides = []): array => [
+            'id' => 'dp_1', 'object' => 'dispute', 'payment_intent' => 'pi_test_1', 'charge' => 'ch_1',
+            'amount' => 42_000, 'reason' => 'product_not_received', 'status' => $status,
+            'evidence_details' => ['due_by' => 1_800_000_000], ...$overrides,
+        ];
+    });
+
+    test('a full refund made in Stripe\'s dashboard is recorded, relists the piece and emails the buyer', function () {
+        $this->mock(PaymentGateway::class)->shouldNotReceive('refund');
+
+        ($this->deliver)(($this->event)('evt_r', 'charge.refunded', ($this->charge)()))->assertOk();
+
+        expect($this->order->fresh()->status)->toBe(OrderStatus::Refunded)
+            ->and($this->payment->fresh()->status)->toBe(PaymentStatus::Refunded)
+            ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Published);
+        Mail::assertQueued(OrderUpdated::class, fn (OrderUpdated $mail) => $mail->hasTo($this->order->buyer_email) && $mail->status === OrderStatus::Refunded);
+    });
+
+    test('the refund event for a refund the app made changes nothing and emails no one', function () {
+        app(OrderService::class)->refund($this->order);
+        Mail::fake();
+
+        ($this->deliver)(($this->event)('evt_r', 'charge.refunded', ($this->charge)()))->assertOk();
+
+        expect($this->order->fresh()->status)->toBe(OrderStatus::Refunded);
+        Mail::assertNothingQueued();
+    });
+
+    test('a partial refund in Stripe is logged, not recorded as a full refund', function () {
+        Log::spy();
+
+        ($this->deliver)(($this->event)('evt_r', 'charge.refunded', ($this->charge)(['refunded' => false, 'amount_refunded' => 5_000])))->assertOk();
+
+        expect($this->order->fresh()->status)->toBe(OrderStatus::Paid);
+        Log::shouldHaveReceived('warning')->withArgs(fn (string $message) => str_contains($message, 'Partial refund'))->once();
+        Mail::assertNothingQueued();
+    });
+
+    test('a dispute marks the payment disputed and emails the owners the deadline', function () {
+        $owner = User::factory()->create();
+
+        ($this->deliver)(($this->event)('evt_d', 'charge.dispute.created', ($this->dispute)('needs_response')))->assertOk();
+
+        expect($this->payment->fresh()->status)->toBe(PaymentStatus::Disputed)
+            ->and($this->order->fresh()->status)->toBe(OrderStatus::Paid);
+        Mail::assertQueued(PaymentDisputed::class, fn (PaymentDisputed $mail) => $mail->hasTo($owner->email)
+            && $mail->outcome === 'open'
+            && $mail->reason === 'product_not_received'
+            && $mail->respondBy?->timestamp === 1_800_000_000);
+    });
+
+    test('a dispute on a payment that was already refunded is logged and ignored', function () {
+        app(OrderService::class)->refund($this->order);
+        Mail::fake();
+        Log::spy();
+
+        ($this->deliver)(($this->event)('evt_d', 'charge.dispute.created', ($this->dispute)('needs_response')))->assertOk();
+
+        expect($this->payment->fresh()->status)->toBe(PaymentStatus::Refunded);
+        Log::shouldHaveReceived('warning')->once();
+        Mail::assertNothingQueued();
+    });
+
+    test('a won dispute makes the payment succeeded again', function (string $closedStatus) {
+        ($this->deliver)(($this->event)('evt_d', 'charge.dispute.created', ($this->dispute)('needs_response')))->assertOk();
+        Mail::fake();
+
+        ($this->deliver)(($this->event)('evt_c', 'charge.dispute.closed', ($this->dispute)($closedStatus)))->assertOk();
+
+        expect($this->payment->fresh()->status)->toBe(PaymentStatus::Succeeded)
+            ->and($this->order->fresh()->status)->toBe(OrderStatus::Paid);
+        Mail::assertQueued(PaymentDisputed::class, fn (PaymentDisputed $mail) => $mail->outcome === 'won');
+    })->with(['won', 'inquiry closed without a chargeback' => 'warning_closed']);
+
+    test('a lost dispute records the order as refunded without refunding again', function () {
+        $this->mock(PaymentGateway::class)->shouldNotReceive('refund');
+        ($this->deliver)(($this->event)('evt_d', 'charge.dispute.created', ($this->dispute)('needs_response')))->assertOk();
+        Mail::fake();
+
+        ($this->deliver)(($this->event)('evt_c', 'charge.dispute.closed', ($this->dispute)('lost')))->assertOk();
+
+        expect($this->payment->fresh()->status)->toBe(PaymentStatus::Refunded)
+            ->and($this->order->fresh()->status)->toBe(OrderStatus::Refunded)
+            ->and($this->piece->fresh()->status)->toBe(ArtPieceStatus::Published);
+        Mail::assertQueued(PaymentDisputed::class, fn (PaymentDisputed $mail) => $mail->outcome === 'lost');
+        Mail::assertNotQueued(OrderUpdated::class);
+    });
+
+    test('a dispute closing for a payment that isn\'t disputed is ignored', function () {
+        ($this->deliver)(($this->event)('evt_c', 'charge.dispute.closed', ($this->dispute)('lost')))->assertOk();
+
+        expect($this->payment->fresh()->status)->toBe(PaymentStatus::Succeeded)
+            ->and($this->order->fresh()->status)->toBe(OrderStatus::Paid);
+        Mail::assertNothingQueued();
+    });
 });

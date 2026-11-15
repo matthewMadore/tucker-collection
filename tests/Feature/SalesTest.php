@@ -176,3 +176,23 @@ test('if Stripe refuses the refund, nothing changes', function () {
         ->and($sale->items->first()->artPiece->fresh()->status)->toBe(ArtPieceStatus::Sold);
     Mail::assertNothingQueued();
 });
+
+test('a disputed order is flagged and can\'t be shipped or refunded until the dispute closes', function () {
+    $this->actingAs(User::factory()->create());
+    $sale = ($this->sale)();
+    $sale->payment->update(['status' => 'disputed']);
+    $this->mock(PaymentGateway::class)->shouldNotReceive('refund');
+
+    $this->get(route('sales.index'))
+        ->assertInertia(fn ($page) => $page
+            ->where('orders.data.0.disputed', true)
+            ->where('orders.data.0.can_ship', false)
+            ->where('orders.data.0.can_refund', false));
+
+    $this->post(route('sales.ship', $sale), ['tracking_number' => '1Z999'])->assertInertiaFlash('toast.type', 'error');
+    $this->post(route('sales.refund', $sale))->assertInertiaFlash('toast.type', 'error');
+
+    expect($sale->fresh()->status)->toBe(OrderStatus::Paid)
+        ->and($sale->payment->fresh()->status)->toBe(PaymentStatus::Disputed);
+    Mail::assertNothingQueued();
+});

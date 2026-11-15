@@ -23,12 +23,13 @@ class OrderService
     public function __construct(private readonly PaymentGateway $gateway) {}
 
     /**
-     * @throws DomainException if the order isn't paid
+     * @throws DomainException if the order isn't paid, or its payment is disputed
      */
     public function ship(Order $order, string $trackingNumber): void
     {
         DB::transaction(function () use ($order, $trackingNumber): void {
-            $order = Order::lockForUpdate()->findOrFail($order->id);
+            $order = Order::with('payment')->lockForUpdate()->findOrFail($order->id);
+            $this->refuseIfDisputed($order);
             $order->transitionTo(OrderStatus::Fulfilled);
             $order->shipment()->updateOrCreate([], [
                 'tracking_number' => $trackingNumber,
@@ -43,27 +44,16 @@ class OrderService
      * Refunds the full payment at Stripe. A piece that hasn't shipped goes
      * back on sale; a shipped one stays sold until it's returned.
      *
-     * @throws DomainException if the order isn't paid, shipped or delivered
+     * @throws DomainException if the order isn't paid, shipped or delivered,
+     *                         or its payment is disputed
      */
     public function refund(Order $order): void
     {
         DB::transaction(function () use ($order): void {
             $order = Order::with(['payment', 'items.artPiece'])->lockForUpdate()->findOrFail($order->id);
-            $hasShipped = $order->status !== OrderStatus::Paid;
+            $this->refuseIfDisputed($order);
 
-            $order->transitionTo(OrderStatus::Refunded);
-            $order->payment?->transitionTo(PaymentStatus::Refunded);
-
-            foreach ($order->items as $item) {
-                // A refunded order is closed: voiding its item frees the piece
-                // for a new order (one live item per piece) and for the status
-                // buttons, e.g. to relist a shipped piece once it's returned.
-                $item->update(['voided_at' => now()]);
-
-                if (! $hasShipped) {
-                    $item->artPiece->transitionTo(ArtPieceStatus::Published);
-                }
-            }
+            $this->recordRefund($order);
 
             // Last, after every state check passed. If Stripe fails, all of
             // the above rolls back; if saving fails after Stripe refunded, the
@@ -72,5 +62,45 @@ class OrderService
 
             Mail::to($order->buyer_email)->queue(new OrderUpdated($order));
         });
+    }
+
+    /**
+     * The bookkeeping of a full refund, without moving money. Used by
+     * refund() and by the webhook when the money went back some other way
+     * (a refund in Stripe's dashboard, or a lost dispute). The order must be
+     * locked, with its payment and items' pieces loaded.
+     *
+     * @throws DomainException if the order or payment can't become refunded
+     */
+    public function recordRefund(Order $order): void
+    {
+        $hasShipped = $order->status !== OrderStatus::Paid;
+
+        $order->transitionTo(OrderStatus::Refunded);
+        $order->payment?->transitionTo(PaymentStatus::Refunded);
+
+        foreach ($order->items as $item) {
+            // A refunded order is closed: voiding its item frees the piece
+            // for a new order (one live item per piece) and for the status
+            // buttons, e.g. to relist a shipped piece once it's returned.
+            $item->update(['voided_at' => now()]);
+
+            if (! $hasShipped) {
+                $item->artPiece->transitionTo(ArtPieceStatus::Published);
+            }
+        }
+    }
+
+    /**
+     * While a buyer disputes the charge, the bank holds the money: Stripe
+     * refuses refunds, and shipping would risk losing the piece too.
+     *
+     * @throws DomainException
+     */
+    private function refuseIfDisputed(Order $order): void
+    {
+        if ($order->payment?->status === PaymentStatus::Disputed) {
+            throw new DomainException('The payment for this order is disputed.');
+        }
     }
 }

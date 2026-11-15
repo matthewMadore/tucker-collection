@@ -8,9 +8,12 @@ use App\Enums\OrderStatus;
 use App\Enums\PaymentStatus;
 use App\Mail\OrderConfirmed;
 use App\Mail\OrderReceived;
+use App\Mail\OrderUpdated;
+use App\Mail\PaymentDisputed;
 use App\Models\Order;
 use App\Models\Payment;
 use App\Models\User;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Mail;
@@ -22,7 +25,10 @@ use Illuminate\Support\Facades\Mail;
  */
 class StripeWebhookHandler
 {
-    public function __construct(private readonly PaymentGateway $gateway) {}
+    public function __construct(
+        private readonly PaymentGateway $gateway,
+        private readonly OrderService $orders,
+    ) {}
 
     /**
      * Recording the event and applying it happen in one transaction: if
@@ -46,6 +52,9 @@ class StripeWebhookHandler
 
             match ($type) {
                 'payment_intent.succeeded' => $this->paymentSucceeded($eventId, $object),
+                'charge.refunded' => $this->chargeRefunded($eventId, $object),
+                'charge.dispute.created' => $this->disputeCreated($eventId, $object),
+                'charge.dispute.closed' => $this->disputeClosed($eventId, $object),
                 default => null,
             };
         });
@@ -56,13 +65,9 @@ class StripeWebhookHandler
      */
     private function paymentSucceeded(string $eventId, array $intent): void
     {
-        $payment = Payment::query()
-            ->where('stripe_payment_intent_id', $intent['id'] ?? null)
-            ->first();
+        $payment = $this->findPayment($eventId, $intent['id'] ?? null);
 
         if ($payment === null) {
-            Log::warning('Stripe webhook for an unknown payment intent.', ['event' => $eventId, 'intent' => $intent['id'] ?? null]);
-
             return;
         }
 
@@ -124,5 +129,125 @@ class StripeWebhookHandler
         // Both are queued to send after this transaction commits.
         Mail::to($order->buyer_email)->queue(new OrderConfirmed($order));
         Mail::to(User::all())->queue(new OrderReceived($order));
+    }
+
+    /**
+     * A refund made outside the app (in Stripe's dashboard). The app's own
+     * refunds also produce this event; their order is already refunded, so
+     * it's skipped, as is the late-payment refund of a cancelled order.
+     *
+     * @param  array<string, mixed>  $charge
+     */
+    private function chargeRefunded(string $eventId, array $charge): void
+    {
+        if (($charge['refunded'] ?? false) !== true) {
+            Log::warning('Partial refund made in Stripe; the app only records full refunds.', [
+                'event' => $eventId,
+                'intent' => $charge['payment_intent'] ?? null,
+                'amount_refunded' => $charge['amount_refunded'] ?? null,
+            ]);
+
+            return;
+        }
+
+        $order = $this->lockOrderFor($eventId, $charge['payment_intent'] ?? null);
+
+        if ($order === null || ! $order->status->canTransitionTo(OrderStatus::Refunded)) {
+            return;
+        }
+
+        $this->orders->recordRefund($order);
+        Mail::to($order->buyer_email)->queue(new OrderUpdated($order));
+    }
+
+    /**
+     * The buyer asked their bank to reverse the charge. Stripe has already
+     * taken the money back while the dispute is open.
+     *
+     * @param  array<string, mixed>  $dispute
+     */
+    private function disputeCreated(string $eventId, array $dispute): void
+    {
+        $order = $this->lockOrderFor($eventId, $dispute['payment_intent'] ?? null);
+
+        if ($order === null) {
+            return;
+        }
+
+        if ($order->payment?->status->canTransitionTo(PaymentStatus::Disputed) !== true) {
+            Log::warning('Stripe dispute for a payment that is not succeeded.', ['event' => $eventId, 'order_id' => $order->id]);
+
+            return;
+        }
+
+        $order->payment->transitionTo(PaymentStatus::Disputed);
+
+        $dueBy = $dispute['evidence_details']['due_by'] ?? null;
+        $this->emailOwners($order, $dispute, 'open', is_int($dueBy) ? CarbonImmutable::createFromTimestamp($dueBy) : null);
+    }
+
+    /**
+     * Lost: the money stays with the buyer, so the order is recorded as
+     * refunded. Won (or an inquiry closed without a chargeback): the
+     * payment is ours again.
+     *
+     * @param  array<string, mixed>  $dispute
+     */
+    private function disputeClosed(string $eventId, array $dispute): void
+    {
+        $order = $this->lockOrderFor($eventId, $dispute['payment_intent'] ?? null);
+
+        if ($order === null || $order->payment?->status !== PaymentStatus::Disputed) {
+            return;
+        }
+
+        $lost = ($dispute['status'] ?? null) === 'lost';
+
+        if ($lost) {
+            $this->orders->recordRefund($order);
+        } else {
+            $order->payment->transitionTo(PaymentStatus::Succeeded);
+        }
+
+        $this->emailOwners($order, $dispute, outcome: $lost ? 'lost' : 'won');
+    }
+
+    /**
+     * @param  array<string, mixed>  $dispute
+     * @param  'open'|'won'|'lost'  $outcome
+     */
+    private function emailOwners(Order $order, array $dispute, string $outcome, ?CarbonImmutable $respondBy = null): void
+    {
+        Mail::to(User::all())->queue(new PaymentDisputed(
+            $order,
+            (string) ($dispute['id'] ?? ''),
+            $outcome,
+            (string) ($dispute['reason'] ?? ''),
+            $respondBy,
+        ));
+    }
+
+    private function findPayment(string $eventId, mixed $intentId): ?Payment
+    {
+        $payment = Payment::query()->where('stripe_payment_intent_id', $intentId)->first();
+
+        if ($payment === null) {
+            Log::warning('Stripe webhook for an unknown payment intent.', ['event' => $eventId, 'intent' => $intentId]);
+        }
+
+        return $payment;
+    }
+
+    /**
+     * Locked like staff actions lock it, so a dashboard refund or dispute
+     * can't interleave with a refund or shipment from the Sales page.
+     */
+    private function lockOrderFor(string $eventId, mixed $intentId): ?Order
+    {
+        $payment = $this->findPayment($eventId, $intentId);
+
+        return $payment === null
+            ? null
+            : Order::with(['payment', 'items.artPiece', 'shipment'])->lockForUpdate()->findOrFail($payment->order_id);
     }
 }

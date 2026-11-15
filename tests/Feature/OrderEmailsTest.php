@@ -3,10 +3,12 @@
 use App\Mail\OrderConfirmed;
 use App\Mail\OrderReceived;
 use App\Mail\OrderUpdated;
+use App\Mail\PaymentDisputed;
 use App\Models\ArtPiece;
 use App\Models\Order;
 use App\Models\OrderItem;
 use App\Models\Shipment;
+use Carbon\CarbonImmutable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Mail;
 
@@ -46,20 +48,46 @@ test('the owners\' notice has what sold, where to ship it and a link to the piec
         ->assertSeeInHtml(route('art-pieces.show', $this->piece));
 });
 
-test('order emails wait for the payment transaction, so a rolled-back payment sends nothing', function (string $mailable) {
+test('order emails wait for the transaction, so a rolled-back change sends nothing', function (Closure $makeMail) {
     // No Mail::fake(): the sync queue and array mailer really send.
-    rescue(fn () => DB::transaction(function () use ($mailable): void {
-        Mail::to('someone@example.com')->queue(new $mailable($this->order));
+    rescue(fn () => DB::transaction(function () use ($makeMail): void {
+        Mail::to('someone@example.com')->queue($makeMail($this->order));
 
-        throw new RuntimeException('Marking the order paid failed.');
+        throw new RuntimeException('Saving the change failed.');
     }), report: false);
 
     expect(app('mailer')->getSymfonyTransport()->messages())->toHaveCount(0);
 
-    DB::transaction(fn () => Mail::to('someone@example.com')->queue(new $mailable($this->order)));
+    DB::transaction(fn () => Mail::to('someone@example.com')->queue($makeMail($this->order)));
 
     expect(app('mailer')->getSymfonyTransport()->messages())->toHaveCount(1);
-})->with([OrderConfirmed::class, OrderReceived::class, OrderUpdated::class]);
+})->with([
+    'OrderConfirmed' => fn (Order $order) => new OrderConfirmed($order),
+    'OrderReceived' => fn (Order $order) => new OrderReceived($order),
+    'OrderUpdated' => fn (Order $order) => new OrderUpdated($order),
+    'PaymentDisputed' => fn (Order $order) => new PaymentDisputed($order, 'dp_1', 'open', 'fraudulent'),
+]);
+
+test('the dispute email tells the owners why, by when to respond, and links to the dispute', function () {
+    $mail = new PaymentDisputed($this->order, 'dp_123', 'open', 'product_not_received', CarbonImmutable::parse('2026-12-01'));
+
+    $mail->assertHasSubject('Payment disputed: Charcoal Owl');
+    $mail->assertSeeInHtml('buyer@example.com')
+        ->assertSeeInHtml('$465.00')
+        ->assertSeeInHtml('product not received')
+        ->assertSeeInHtml('December 1, 2026')
+        ->assertSeeInHtml('https://dashboard.stripe.com/disputes/dp_123');
+});
+
+test('the dispute email reports the outcome when it closes', function (string $outcome, string $subject, string $text) {
+    $mail = new PaymentDisputed($this->order, 'dp_123', $outcome, 'fraudulent');
+
+    $mail->assertHasSubject($subject);
+    $mail->assertSeeInHtml($text);
+})->with([
+    'won' => ['won', 'Dispute won: Charcoal Owl', 'is yours again'],
+    'lost' => ['lost', 'Dispute lost: Charcoal Owl', 'The bank returned $465.00'],
+]);
 
 test('the shipped email has the tracking number and a UPS tracking link', function () {
     $this->order->shipment->update(['tracking_number' => '1Z999AA10123456784']);

@@ -28,6 +28,7 @@ type Sale = {
     shipping_address: Record<string, string | null>;
     service_level: string | null;
     tracking_number: string | null;
+    disputed: boolean;
     can_ship: boolean;
     can_refund: boolean;
 };
@@ -89,6 +90,9 @@ function refundOrder(sale: Sale): void {
                     >
                         {{ labels[sale.status] ?? sale.status }}
                     </Badge>
+                    <Badge v-if="sale.disputed" variant="destructive">
+                        Disputed
+                    </Badge>
                 </div>
                 <p class="text-sm">
                     {{ dollars(sale.total_cents) }}
@@ -123,6 +127,16 @@ function refundOrder(sale: Sale): void {
             </address>
 
             <div class="grid content-start gap-2">
+                <p v-if="sale.disputed" class="text-sm">
+                    The buyer disputed this payment with their bank. Respond in
+                    <a
+                        href="https://dashboard.stripe.com/disputes"
+                        class="underline"
+                        target="_blank"
+                        rel="noopener"
+                        >Stripe</a
+                    >; shipping and refunds wait until it's settled.
+                </p>
                 <p v-if="sale.tracking_number" class="text-sm">
                     Tracking: <strong>{{ sale.tracking_number }}</strong>
                 </p>

@@ -3,6 +3,7 @@
 namespace App\Http\Controllers;
 
 use App\Enums\OrderStatus;
+use App\Enums\PaymentStatus;
 use App\Http\Requests\ShipOrderRequest;
 use App\Models\Order;
 use App\Services\OrderService;
@@ -20,11 +21,14 @@ class SalesController extends Controller
 {
     public function index(): Response
     {
-        $orders = Order::with(['items', 'shipment'])
+        $orders = Order::with(['items', 'shipment', 'payment'])
             ->whereNotIn('status', [OrderStatus::Pending, OrderStatus::Cancelled])
             ->latest('placed_at')
             ->paginate(20)
             ->through(fn (Order $order) => [
+                // The bank holds the money until the dispute closes; it's
+                // answered in Stripe, and the app blocks shipping and refunds.
+                'disputed' => $order->payment?->status === PaymentStatus::Disputed,
                 'id' => $order->id,
                 'status' => $order->status->value,
                 'placed_at' => $order->placed_at?->toIso8601String(),
@@ -35,8 +39,8 @@ class SalesController extends Controller
                 'shipping_address' => $order->shipping_address,
                 'service_level' => $order->shipment?->service_level,
                 'tracking_number' => $order->shipment?->tracking_number,
-                'can_ship' => $order->status->canTransitionTo(OrderStatus::Fulfilled),
-                'can_refund' => $order->status->canTransitionTo(OrderStatus::Refunded),
+                'can_ship' => $order->status->canTransitionTo(OrderStatus::Fulfilled) && $order->payment?->status !== PaymentStatus::Disputed,
+                'can_refund' => $order->status->canTransitionTo(OrderStatus::Refunded) && $order->payment?->status !== PaymentStatus::Disputed,
             ]);
 
         return Inertia::render('sales/Index', ['orders' => $orders]);
